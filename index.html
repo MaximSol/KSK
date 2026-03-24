@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>КСК Дубрава — Планирование ресурсов</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+    crossorigin="anonymous"
+  >
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+  >
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-body-tertiary">
+  <div id="app" class="d-flex flex-column min-vh-100">
+    <nav id="app-navbar" class="navbar navbar-expand bg-white border-bottom sticky-top shadow-sm">
+      <div class="container-fluid px-3 gap-3 flex-nowrap">
+        <div class="navbar-brand mb-0 fw-semibold">КСК Дубрава</div>
+
+        <div id="header-controls" class="d-flex align-items-center gap-2 ms-auto flex-nowrap">
+          <div id="period-switch" class="btn-group btn-group-sm" role="group" aria-label="Период">
+            <button id="period-day-btn" type="button" class="btn btn-outline-secondary active" data-period="day">День</button>
+            <button id="period-week-btn" type="button" class="btn btn-outline-secondary" data-period="week">Неделя</button>
+          </div>
+
+          <div id="date-nav" class="btn-group btn-group-sm" role="group" aria-label="Навигация по датам">
+            <button id="prev-date-btn" type="button" class="btn btn-outline-secondary" data-nav="-1">‹</button>
+            <button id="current-date-btn" type="button" class="btn btn-outline-secondary disabled" aria-disabled="true"></button>
+            <button id="next-date-btn" type="button" class="btn btn-outline-secondary" data-nav="1">›</button>
+          </div>
+
+          <div class="dropdown">
+            <button
+              id="resource-view-btn"
+              type="button"
+              class="btn btn-outline-secondary btn-sm dropdown-toggle"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+            >
+              По тренерам
+            </button>
+            <ul id="resource-view-menu" class="dropdown-menu dropdown-menu-end">
+              <li><button type="button" class="dropdown-item active" data-view="trainers">По тренерам</button></li>
+              <li><button type="button" class="dropdown-item" data-view="horses">По лошадям</button></li>
+              <li><button type="button" class="dropdown-item" data-view="arenas">По площадкам</button></li>
+            </ul>
+          </div>
+
+          <button id="new-booking-btn" type="button" class="btn btn-primary btn-sm">+ Новое занятие</button>
+          <button id="load-excel-stress-week-btn" type="button" class="btn btn-outline-secondary btn-sm">Загрузить Excel-неделю</button>
+          <button id="reset-data-btn" type="button" class="btn btn-outline-danger btn-sm">Сбросить данные</button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="flex-grow-1 overflow-hidden">
+      <section id="calendar-page" class="container-fluid py-3 h-100 d-flex flex-column gap-3">
+        <div id="calendar-toolbar" class="d-flex justify-content-between align-items-center gap-3">
+          <div>
+            <h1 id="calendar-title" class="h5 mb-1">Расписание</h1>
+            <div id="calendar-subtitle" class="text-body-secondary small"></div>
+          </div>
+          <div id="calendar-legend" class="d-flex align-items-center gap-2 small flex-wrap"></div>
+        </div>
+
+        <section id="calendar-overview" class="calendar-insights-shell"></section>
+
+        <section
+          id="calendar-focus-controls"
+          class="calendar-insights-shell"
+          aria-label="Фокус по записям"
+        ></section>
+
+        <div id="schedule-workspace" class="flex-grow-1">
+          <section id="calendar-shell" class="card shadow-sm overflow-hidden">
+            <div id="calendar-container" class="card-body p-0 h-100"></div>
+          </section>
+
+          <aside id="booking-details-panel" class="card shadow-sm">
+            <div id="booking-details-content"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="booking-modal" class="modal fade" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h2 id="booking-modal-title" class="modal-title fs-5">Новое занятие</h2>
+            <div id="booking-modal-subtitle" class="small text-body-secondary"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+
+        <form id="booking-form">
+          <div class="modal-body">
+            <input type="hidden" id="booking-id">
+
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label" for="booking-date">Дата</label>
+                <input id="booking-date" type="date" class="form-control">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="booking-time">Время</label>
+                <select id="booking-time" class="form-select"></select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="booking-duration">Длительность</label>
+                <select id="booking-duration" class="form-select"></select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-service-type">Тип</label>
+                <select id="booking-service-type" class="form-select"></select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-client-name">Клиент</label>
+                <input id="booking-client-name" type="text" class="form-control">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-trainer-id">Тренер</label>
+                <select id="booking-trainer-id" class="form-select"></select>
+                <div class="form-text" id="booking-trainer-availability">График тренера появится после выбора даты и тренера</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-horse-id">Лошадь</label>
+                <select id="booking-horse-id" class="form-select"></select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-groom-id">Коновод</label>
+                <select id="booking-groom-id" class="form-select"></select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-arena-id">Площадка</label>
+                <select id="booking-arena-id" class="form-select"></select>
+              </div>
+              <div class="col-12">
+                <label class="form-label" for="booking-notes">Заметки</label>
+                <textarea id="booking-notes" class="form-control" rows="3"></textarea>
+              </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+              <div class="col-md-6">
+                <label class="form-label" for="booking-payment-type">Тип оплаты</label>
+                <select id="booking-payment-type" class="form-select">
+                  <option value="">Не задано</option>
+                  <option value="single">Разовое</option>
+                  <option value="subscription">Абонемент</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="booking-payment-status">Статус оплаты</label>
+                <select id="booking-payment-status" class="form-select">
+                  <option value="">Не задано</option>
+                  <option value="paid">Оплачено</option>
+                  <option value="unpaid">Не оплачено</option>
+                </select>
+              </div>
+              <div id="booking-single-price-group" class="col-md-6" hidden>
+                <label class="form-label" for="booking-single-price">Стоимость</label>
+                <input id="booking-single-price" type="number" min="1" step="1" class="form-control" placeholder="3200">
+              </div>
+              <div id="booking-subscription-remaining-group" class="col-md-6" hidden>
+                <label class="form-label" for="booking-subscription-remaining">Осталось занятий</label>
+                <input id="booking-subscription-remaining" type="number" min="0" step="1" class="form-control" placeholder="4">
+              </div>
+              <div class="col-md-8">
+                <label class="form-label" for="booking-bitrix-deal-url">Сделка Bitrix24</label>
+                <input id="booking-bitrix-deal-url" type="url" class="form-control" placeholder="https://...">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="booking-bitrix-deal-label">Короткий ярлык</label>
+                <input id="booking-bitrix-deal-label" type="text" class="form-control" maxlength="12" placeholder="CRM">
+              </div>
+              <div class="col-12">
+                <a id="booking-bitrix-deal-link" class="small d-none" href="#" target="_blank" rel="noopener noreferrer">Открыть сделку</a>
+              </div>
+            </div>
+
+            <div id="booking-conflicts" class="d-grid gap-2 mt-3"></div>
+          </div>
+
+          <div class="modal-footer justify-content-between">
+            <div>
+              <button id="booking-delete-btn" type="button" class="btn btn-outline-danger d-none">Удалить</button>
+            </div>
+            <div class="d-flex gap-2 ms-auto flex-wrap justify-content-end">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+              <button id="booking-save-draft-btn" type="button" class="btn btn-outline-primary">Сохранить черновик</button>
+              <button id="booking-confirm-btn" type="button" class="btn btn-primary">Подтвердить</button>
+              <button id="booking-save-btn" type="button" class="btn btn-primary d-none">Сохранить</button>
+              <button id="booking-complete-btn" type="button" class="btn btn-success d-none">Проведено</button>
+              <button id="booking-cancel-btn" type="button" class="btn btn-outline-danger d-none">Отменить занятие</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
+
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+    crossorigin="anonymous"
+  ></script>
+  <script>
+    window.KSK_FLAGS = window.KSK_FLAGS || {};
+    if (typeof window.KSK_FLAGS.scheduleInsightsV2 !== "boolean") {
+      window.KSK_FLAGS.scheduleInsightsV2 = window.localStorage.getItem("ksk_schedule_insights_v2") !== "0";
+    }
+    if (typeof window.KSK_FLAGS.trainerScheduleMvp !== "boolean") {
+      window.KSK_FLAGS.trainerScheduleMvp = window.localStorage.getItem("ksk_trainer_schedule_mvp") !== "0";
+    }
+  </script>
+  <script defer src="js/data.js"></script>
+  <script defer src="js/conflicts.js"></script>
+  <script defer src="js/booking.js"></script>
+  <script defer src="js/calendar.js"></script>
+  <script defer src="js/app.js"></script>
+</body>
+</html>
