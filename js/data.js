@@ -4,6 +4,11 @@ window.KSK = window.KSK || {};
   var KSK = window.KSK;
   var STORAGE_PREFIX = "ksk_";
   var STORAGE_KEYS = ["trainers", "trainerSchedules", "horses", "grooms", "arenas", "bookings"];
+  var memoryCache = {};
+  var derivedCache = {
+    bookings: null,
+    trainerSchedulesById: null
+  };
 
   var TRAINERS = [
     { id: "t1", name: "Ольга", color: "#4A90D9" },
@@ -149,10 +154,7 @@ window.KSK = window.KSK || {};
   }
 
   function getTrainerScheduleEntry(trainerId) {
-    var schedules = read("trainerSchedules");
-    return schedules.find(function (schedule) {
-      return schedule.trainerId === trainerId;
-    }) || null;
+    return buildTrainerScheduleMap()[trainerId] || null;
   }
 
   function formatDateLabel(isoDate, options) {
@@ -215,16 +217,76 @@ window.KSK = window.KSK || {};
     return STORAGE_PREFIX + name;
   }
 
+  function invalidateDerivedCache(name) {
+    if (!name || name === "bookings") {
+      derivedCache.bookings = null;
+    }
+    if (!name || name === "trainerSchedules") {
+      derivedCache.trainerSchedulesById = null;
+    }
+  }
+
   function read(name) {
+    if (Object.prototype.hasOwnProperty.call(memoryCache, name)) {
+      return memoryCache[name];
+    }
     var raw = window.localStorage.getItem(getStorageKey(name));
     if (!raw) {
-      return [];
+      memoryCache[name] = [];
+      return memoryCache[name];
     }
-    return JSON.parse(raw);
+    memoryCache[name] = JSON.parse(raw);
+    return memoryCache[name];
   }
 
   function write(name, value) {
-    window.localStorage.setItem(getStorageKey(name), JSON.stringify(value));
+    var serialized = JSON.stringify(value);
+    window.localStorage.setItem(getStorageKey(name), serialized);
+    memoryCache[name] = JSON.parse(serialized);
+    invalidateDerivedCache(name);
+  }
+
+  function buildTrainerScheduleMap() {
+    if (derivedCache.trainerSchedulesById) {
+      return derivedCache.trainerSchedulesById;
+    }
+
+    derivedCache.trainerSchedulesById = {};
+    read("trainerSchedules").forEach(function (schedule) {
+      derivedCache.trainerSchedulesById[schedule.trainerId] = schedule;
+    });
+
+    return derivedCache.trainerSchedulesById;
+  }
+
+  function buildBookingsCache() {
+    var normalized;
+    var byDate;
+    var byId;
+
+    if (derivedCache.bookings) {
+      return derivedCache.bookings;
+    }
+
+    normalized = read("bookings").map(normalizeBooking).sort(compareBookings);
+    byDate = {};
+    byId = {};
+
+    normalized.forEach(function (booking) {
+      if (!byDate[booking.date]) {
+        byDate[booking.date] = [];
+      }
+      byDate[booking.date].push(booking);
+      byId[booking.id] = booking;
+    });
+
+    derivedCache.bookings = {
+      all: normalized,
+      byDate: byDate,
+      byId: byId
+    };
+
+    return derivedCache.bookings;
   }
 
   function normalizeBooking(booking) {
@@ -546,21 +608,15 @@ window.KSK = window.KSK || {};
     },
 
     getBookings: function (date) {
-      var bookings = read("bookings").map(normalizeBooking).sort(compareBookings);
+      var bookingsCache = buildBookingsCache();
       if (!date) {
-        return bookings;
+        return bookingsCache.all;
       }
-      return bookings.filter(function (booking) {
-        return booking.date === date;
-      });
+      return bookingsCache.byDate[date] || [];
     },
 
     getBookingById: function (id) {
-      var bookings = read("bookings");
-      var match = bookings.find(function (booking) {
-        return booking.id === id;
-      });
-      return match ? normalizeBooking(match) : null;
+      return buildBookingsCache().byId[id] || null;
     },
 
     getTrainerShiftForDate: function (trainerId, isoDate) {
@@ -803,6 +859,8 @@ window.KSK = window.KSK || {};
       STORAGE_KEYS.forEach(function (key) {
         window.localStorage.removeItem(getStorageKey(key));
       });
+      memoryCache = {};
+      invalidateDerivedCache();
     }
   };
 })();

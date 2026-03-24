@@ -439,7 +439,7 @@ window.KSK = window.KSK || {};
 
     if (validation.isValid) {
       var probe = normalizeFormData(raw, state.currentStatus || "draft");
-      var conflicts = KSK.Conflicts.checkConflicts(probe, KSK.Data.getBookings());
+      var conflicts = KSK.Conflicts.checkConflicts(probe, KSK.Data.getBookings(probe.date));
       conflicts.forEach(function (conflict) {
         var fieldId = fieldToConflictMap[conflict.type];
         if (fieldId) {
