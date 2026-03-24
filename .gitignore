@@ -1,3 +1,27 @@
 .DS_Store
+
+# Internal documentation and planning artifacts
 memory-bank/
 AGENT.md
+*.md
+*.xlsx
+*.xls
+
+# Editor and local metadata
+.vscode/
+.idea/
+.history/
+
+# Common generated or temporary folders
+node_modules/
+dist/
+build/
+coverage/
+tmp/
+temp/
+
+# Local environment and swap files
+.env
+.env.*
+*.swp
+*.swo
