@@ -507,7 +507,7 @@ window.KSK = window.KSK || {};
 
     if (validation.isValid) {
       var probe = normalizeFormData(raw, state.currentStatus || "draft");
-      var conflicts = KSK.Conflicts.checkConflicts(probe, KSK.Data.getBookings(probe.date));
+      var conflicts = KSK.Conflicts.checkConflicts(probe, KSK.Data.getBookings());
       conflicts.forEach(function (conflict) {
         var fieldId = fieldToConflictMap[conflict.type];
         if (fieldId) {
@@ -539,13 +539,11 @@ window.KSK = window.KSK || {};
   }
 
   function populateServiceOptions() {
-    var options = [optionHtml("", "Выберите тип")];
-
-    Object.keys(Utils.SERVICE_LABELS).forEach(function (serviceType) {
-      options.push(optionHtml(serviceType, Utils.SERVICE_LABELS[serviceType]));
-    });
-
-    setOptions(getInput("booking-service-type"), options);
+    setOptions(getInput("booking-service-type"), [
+      optionHtml("", "Выберите тип"),
+      optionHtml("training", "Обучение"),
+      optionHtml("rental", "Аренда")
+    ]);
   }
 
   function populateLookupOptions() {

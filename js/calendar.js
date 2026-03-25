@@ -5,6 +5,8 @@ window.KSK = window.KSK || {};
   var Utils = KSK.Utils;
   var HOUR_HEIGHT = 96;
   var QUARTER_HEIGHT = 24;
+  var DEFAULT_HOUR_HEIGHT = 96;
+  var DEFAULT_QUARTER_HEIGHT = 24;
   var container;
   var isBound = false;
 
@@ -25,6 +27,26 @@ window.KSK = window.KSK || {};
 
   function bookingEnd(booking) {
     return bookingStart(booking) + Number(booking.duration);
+  }
+
+  function getCssPixelValue(styles, propertyName, fallback) {
+    var value = parseFloat(styles.getPropertyValue(propertyName));
+    return value > 0 ? value : fallback;
+  }
+
+  function syncRuntimeMetrics() {
+    var metricSource = container || document.documentElement;
+    var styles;
+
+    if (!metricSource) {
+      HOUR_HEIGHT = DEFAULT_HOUR_HEIGHT;
+      QUARTER_HEIGHT = DEFAULT_QUARTER_HEIGHT;
+      return;
+    }
+
+    styles = window.getComputedStyle(document.documentElement);
+    HOUR_HEIGHT = getCssPixelValue(styles, "--ksk-hour-height", DEFAULT_HOUR_HEIGHT);
+    QUARTER_HEIGHT = getCssPixelValue(styles, "--ksk-quarter-height", DEFAULT_QUARTER_HEIGHT);
   }
 
   function topForMinutes(minutes) {
@@ -663,6 +685,8 @@ window.KSK = window.KSK || {};
       var trainerScheduleEnabled = resourceType === "trainers" && KSK.App.isTrainerScheduleEnabled();
       var hasFocus = enhanced && KSK.App.state.focusFilter !== "all";
 
+      syncRuntimeMetrics();
+
       if (resourceType === "trainers") {
         resources = KSK.Data.getTrainers();
       } else if (resourceType === "horses") {
@@ -806,6 +830,8 @@ window.KSK = window.KSK || {};
       var tracks = {};
       var enhanced = KSK.App.isScheduleInsightsEnabled();
       var hasFocus = enhanced && KSK.App.state.focusFilter !== "all";
+
+      syncRuntimeMetrics();
 
       grid.style.setProperty("--ksk-column-count", "7");
       grid.appendChild(timeHeader);
@@ -1029,6 +1055,7 @@ window.KSK = window.KSK || {};
       if (!container) {
         return;
       }
+      syncRuntimeMetrics();
       container.querySelectorAll(".calendar-hour-band.is-current-hour").forEach(function (band) {
         band.classList.remove("is-current-hour");
       });

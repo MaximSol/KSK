@@ -4,6 +4,10 @@ window.KSK = window.KSK || {};
   var KSK = window.KSK;
   var Utils = KSK.Utils;
   var FOCUS_FILTERS = ["all", "conflicts", "unpaid", "subscription"];
+  var DESKTOP_DENSITY_QUERY = "(min-width: 1800px) and (min-height: 980px)";
+  var desktopDensityMql = null;
+  var desktopDensityMatches = null;
+  var isDesktopDensityRefreshBound = false;
 
   function byId(id) {
     return document.getElementById(id);
@@ -270,24 +274,44 @@ window.KSK = window.KSK || {};
     return button;
   }
 
-  var CANONICAL_START_STATE = {
-    currentDate: "2026-03-19",
-    viewType: "trainers",
-    period: "day",
-    selectedBookingId: null,
-    focusFilter: "all"
-  };
+  function bindDesktopDensityRefresh() {
+    function handleDesktopDensityChange(event) {
+      var nextMatches = event && typeof event.matches === "boolean"
+        ? event.matches
+        : desktopDensityMql.matches;
 
-  var EXCEL_STRESS_WEEK_STATE = {
-    currentDate: "2026-03-23",
-    viewType: "trainers",
-    period: "week",
-    selectedBookingId: null,
-    focusFilter: "all"
-  };
+      if (nextMatches === desktopDensityMatches) {
+        return;
+      }
+
+      desktopDensityMatches = nextMatches;
+      KSK.App.refresh();
+    }
+
+    if (isDesktopDensityRefreshBound) {
+      return;
+    }
+
+    desktopDensityMql = window.matchMedia(DESKTOP_DENSITY_QUERY);
+    desktopDensityMatches = desktopDensityMql.matches;
+
+    if (typeof desktopDensityMql.addEventListener === "function") {
+      desktopDensityMql.addEventListener("change", handleDesktopDensityChange);
+    } else if (typeof desktopDensityMql.addListener === "function") {
+      desktopDensityMql.addListener(handleDesktopDensityChange);
+    }
+
+    isDesktopDensityRefreshBound = true;
+  }
 
   KSK.App = {
-    state: Object.assign({}, CANONICAL_START_STATE),
+    state: {
+      currentDate: "2026-03-19",
+      viewType: "trainers",
+      period: "day",
+      selectedBookingId: null,
+      focusFilter: "all"
+    },
 
     init: function () {
       KSK.Data.init();
@@ -316,18 +340,12 @@ window.KSK = window.KSK || {};
       byId("new-booking-btn").addEventListener("click", function () {
         KSK.Booking.openNew();
       });
-      byId("load-excel-stress-week-btn").addEventListener("click", function () {
-        KSK.Data.seedExcelStressWeek();
-        Object.assign(KSK.App.state, EXCEL_STRESS_WEEK_STATE);
-        KSK.Booking.showToast("Excel-неделя загружена", "success");
-        KSK.App.refresh();
-      });
       byId("reset-data-btn").addEventListener("click", function () {
         if (!window.confirm("Сбросить все данные к каноническому демо-набору?")) {
           return;
         }
         KSK.Data.seedData();
-        Object.assign(KSK.App.state, CANONICAL_START_STATE);
+        KSK.App.state.selectedBookingId = null;
         KSK.Booking.showToast("Демо-данные восстановлены", "success");
         KSK.App.refresh();
       });
@@ -386,6 +404,7 @@ window.KSK = window.KSK || {};
       });
 
       buildLegend(byId("calendar-legend"));
+      bindDesktopDensityRefresh();
       this.refresh();
       window.setInterval(function () {
         KSK.Calendar.highlightCurrentHour();
