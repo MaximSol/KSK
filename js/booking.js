@@ -204,6 +204,18 @@ window.KSK = window.KSK || {};
       : "Время занятия выходит за смену тренера";
   }
 
+  function formatTrainerOptionLabel(trainer, selectableMeta) {
+    if (!selectableMeta) {
+      return trainer.name;
+    }
+
+    if (selectableMeta.isOff) {
+      return trainer.name + " - выходной";
+    }
+
+    return trainer.name;
+  }
+
   function renderTrainerAvailabilityHint(raw) {
     var helper = elements["booking-trainer-availability"];
     var enabled = KSK.App && typeof KSK.App.isTrainerScheduleEnabled === "function" && KSK.App.isTrainerScheduleEnabled();
@@ -227,6 +239,58 @@ window.KSK = window.KSK || {};
     helper.textContent = shift.isOff
       ? "У тренера выходной"
       : "Смена тренера: " + shift.label;
+  }
+
+  function getTrainerSelectableMeta(raw) {
+    var enabled = KSK.App && typeof KSK.App.isTrainerScheduleEnabled === "function" && KSK.App.isTrainerScheduleEnabled();
+    var bookingsForDate;
+
+    if (!enabled || !raw || !raw.date || !raw.trainerId) {
+      return null;
+    }
+
+    bookingsForDate = KSK.Data.getBookings(raw.date).filter(function (booking) {
+      return booking.id !== raw.id;
+    });
+
+    return KSK.Data.getTrainerSelectableHourSlots(raw.trainerId, raw.date, bookingsForDate);
+  }
+
+  function renderTrainerSlotPicker(raw) {
+    var picker = elements["booking-trainer-slot-picker"];
+    var buttons = elements["booking-trainer-slot-buttons"];
+    var selectableMeta = getTrainerSelectableMeta(raw);
+    var fragment;
+
+    if (!picker || !buttons) {
+      return;
+    }
+
+    if (!selectableMeta || selectableMeta.isOff || !selectableMeta.startSlots.length) {
+      picker.hidden = true;
+      picker.classList.add("d-none");
+      buttons.replaceChildren();
+      return;
+    }
+
+    fragment = document.createDocumentFragment();
+    selectableMeta.startSlots.forEach(function (slot) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-sm btn-outline-primary booking-slot-picker__button";
+      if (raw.time === slot) {
+        button.classList.add("active");
+      }
+      button.dataset.slotTime = slot;
+      button.textContent = slot;
+      button.setAttribute("aria-label", "Поставить время " + slot);
+      fragment.appendChild(button);
+    });
+
+    buttons.replaceChildren(fragment);
+
+    picker.hidden = false;
+    picker.classList.remove("d-none");
   }
 
   function setPaymentGroupVisibility(groupId, isVisible) {
@@ -324,7 +388,8 @@ window.KSK = window.KSK || {};
       isAvailable: true,
       reason: null,
       label: "",
-      message: ""
+      message: "",
+      severity: null
     };
 
     function markGeneralInvalid(fieldId) {
@@ -387,10 +452,13 @@ window.KSK = window.KSK || {};
         isAvailable: availabilityResult.isAvailable,
         reason: availabilityResult.reason,
         label: availabilityResult.label,
-        message: getTrainerAvailabilityMessage(availabilityResult)
+        message: getTrainerAvailabilityMessage(availabilityResult),
+        severity: availabilityResult.reason === "off"
+          ? "warning"
+          : (availabilityResult.reason === "outside_shift" ? "danger" : null)
       };
 
-      if (!availabilityResult.isAvailable) {
+      if (availabilityResult.reason === "outside_shift") {
         invalidFieldIds.push("booking-trainer-id", "booking-time", "booking-duration");
       }
     }
@@ -434,7 +502,7 @@ window.KSK = window.KSK || {};
     }
 
     if (validation.availability.message) {
-      fragment.appendChild(createAlert(validation.availability.message, "danger"));
+      fragment.appendChild(createAlert(validation.availability.message, validation.availability.severity));
     }
 
     if (validation.isValid) {
@@ -501,6 +569,39 @@ window.KSK = window.KSK || {};
     setOptions(getInput("booking-arena-id"), [optionHtml("", "Выберите площадку")].concat(arenas.map(function (arena) {
       return optionHtml(arena.id, arena.name);
     })));
+  }
+
+  function populateTrainerOptions(raw) {
+    var select = getInput("booking-trainer-id");
+    var selectedValue = select.value;
+    var trainers = KSK.Data.getTrainers();
+    var enabled = KSK.App && typeof KSK.App.isTrainerScheduleEnabled === "function" && KSK.App.isTrainerScheduleEnabled();
+    var bookingsForDate = null;
+    var options;
+
+    if (enabled && raw && raw.date) {
+      bookingsForDate = KSK.Data.getBookings(raw.date).filter(function (booking) {
+        return booking.id !== raw.id;
+      });
+    }
+
+    options = [optionHtml("", "Выберите тренера")].concat(trainers.map(function (trainer) {
+      var label = trainer.name;
+
+      if (enabled && raw && raw.date) {
+        label = formatTrainerOptionLabel(
+          trainer,
+          KSK.Data.getTrainerSelectableHourSlots(trainer.id, raw.date, bookingsForDate)
+        );
+      }
+
+      return optionHtml(trainer.id, label);
+    }));
+
+    setOptions(select, options);
+    select.value = trainers.some(function (trainer) {
+      return trainer.id === selectedValue;
+    }) ? selectedValue : "";
   }
 
   function updateButtons(mode, status) {
@@ -575,6 +676,8 @@ window.KSK = window.KSK || {};
         "booking-client-name",
         "booking-trainer-id",
         "booking-trainer-availability",
+        "booking-trainer-slot-picker",
+        "booking-trainer-slot-buttons",
         "booking-horse-id",
         "booking-groom-id",
         "booking-arena-id",
@@ -605,12 +708,31 @@ window.KSK = window.KSK || {};
         event.preventDefault();
       });
 
+      elements["booking-trainer-slot-buttons"].addEventListener("click", function (event) {
+        var button = event.target.closest("button[data-slot-time]");
+
+        if (!button) {
+          return;
+        }
+
+        getInput("booking-time").value = button.dataset.slotTime;
+        getInput("booking-time").dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
       getAllFormFields().forEach(function (field) {
         var eventName = field.tagName === "INPUT" || field.tagName === "TEXTAREA" ? "input" : "change";
         var handler = function () {
           var raw = collectFormData();
           if (field.id === "booking-payment-type") {
             updatePaymentFieldVisibility(raw);
+            raw = collectFormData();
+          }
+          if (field.id === "booking-date") {
+            populateTrainerOptions(raw);
+            raw = collectFormData();
+          }
+          if (field.id === "booking-date" || field.id === "booking-trainer-id" || field.id === "booking-time") {
+            renderTrainerSlotPicker(raw);
             raw = collectFormData();
           }
           updateBitrixDealLink(raw);
@@ -744,6 +866,8 @@ window.KSK = window.KSK || {};
       getInput("booking-subscription-remaining").value = booking.subscriptionRemaining === null || booking.subscriptionRemaining === undefined ? "" : String(booking.subscriptionRemaining);
       getInput("booking-bitrix-deal-url").value = booking.bitrixDealUrl || "";
       getInput("booking-bitrix-deal-label").value = booking.bitrixDealLabel || "";
+      populateTrainerOptions(collectFormData());
+      renderTrainerSlotPicker(collectFormData());
 
       updatePaymentFieldVisibility(booking);
       elements["booking-modal-subtitle"].textContent = formatModalSubtitle(booking);

@@ -130,6 +130,10 @@
                 <label class="form-label" for="booking-trainer-id">Тренер</label>
                 <select id="booking-trainer-id" class="form-select"></select>
                 <div class="form-text" id="booking-trainer-availability">График тренера появится после выбора даты и тренера</div>
+                <div id="booking-trainer-slot-picker" class="booking-slot-picker d-none" hidden>
+                  <div class="booking-slot-picker__label">Свободное время</div>
+                  <div id="booking-trainer-slot-buttons" class="booking-slot-picker__list" aria-label="Свободные старты тренера"></div>
+                </div>
               </div>
               <div class="col-md-6">
                 <label class="form-label" for="booking-horse-id">Лошадь</label>

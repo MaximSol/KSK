@@ -157,6 +157,125 @@ window.KSK = window.KSK || {};
     return buildTrainerScheduleMap()[trainerId] || null;
   }
 
+  function buildTrainerFreeWindowMeta(trainerId, isoDate, bookingsForDate) {
+    var shift = KSK.Data.getTrainerShiftForDate(trainerId, isoDate);
+    var safeResult = {
+      shift: shift,
+      windows: [],
+      startSlots: [],
+      hasCapacity: false
+    };
+    var shiftStart;
+    var shiftEnd;
+    var busyIntervals;
+    var mergedBusy;
+    var windows = [];
+    var startSlots = [];
+    var cursor;
+
+    if (!trainerId || !isoDate) {
+      return safeResult;
+    }
+
+    if (shift.isOff) {
+      return safeResult;
+    }
+
+    shiftStart = parseTimeToMinutes(shift.start);
+    shiftEnd = parseTimeToMinutes(shift.end);
+    if (Number.isNaN(shiftStart) || Number.isNaN(shiftEnd) || shiftEnd <= shiftStart) {
+      return safeResult;
+    }
+
+    busyIntervals = (Array.isArray(bookingsForDate) ? bookingsForDate : KSK.Data.getBookings(isoDate))
+      .filter(function (booking) {
+        return booking
+          && booking.status !== "cancelled"
+          && booking.trainerId === trainerId;
+      })
+      .map(function (booking) {
+        var start = parseTimeToMinutes(booking.time);
+        var end = start + Number(booking.duration);
+        var clippedStart;
+        var clippedEnd;
+
+        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+          return null;
+        }
+
+        clippedStart = Math.max(start, shiftStart);
+        clippedEnd = Math.min(end, shiftEnd);
+        if (clippedEnd <= clippedStart) {
+          return null;
+        }
+
+        return {
+          start: clippedStart,
+          end: clippedEnd
+        };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) {
+        if (a.start !== b.start) {
+          return a.start - b.start;
+        }
+        return a.end - b.end;
+      });
+
+    mergedBusy = [];
+    busyIntervals.forEach(function (interval) {
+      var previous = mergedBusy[mergedBusy.length - 1];
+
+      if (!previous || interval.start > previous.end) {
+        mergedBusy.push({
+          start: interval.start,
+          end: interval.end
+        });
+        return;
+      }
+
+      previous.end = Math.max(previous.end, interval.end);
+    });
+
+    cursor = shiftStart;
+    mergedBusy.forEach(function (interval) {
+      if (interval.start > cursor) {
+        windows.push({
+          start: formatTime(cursor),
+          end: formatTime(interval.start),
+          duration: interval.start - cursor
+        });
+      }
+      cursor = Math.max(cursor, interval.end);
+    });
+
+    if (cursor < shiftEnd) {
+      windows.push({
+        start: formatTime(cursor),
+        end: formatTime(shiftEnd),
+        duration: shiftEnd - cursor
+      });
+    }
+
+    windows.forEach(function (windowMeta) {
+      var windowStart = parseTimeToMinutes(windowMeta.start);
+      var windowEnd = parseTimeToMinutes(windowMeta.end);
+      var firstHour = Math.ceil(windowStart / 60) * 60;
+      var minute;
+
+      for (minute = firstHour; minute + 60 <= windowEnd; minute += 60) {
+        startSlots.push(formatTime(minute));
+      }
+    });
+
+    return {
+      shift: shift,
+      windows: windows,
+      startSlots: startSlots,
+      hasCapacity: startSlots.length > 0
+    };
+  }
+
   function formatDateLabel(isoDate, options) {
     return toDate(isoDate).toLocaleDateString("ru-RU", options || {
       day: "numeric",
@@ -642,122 +761,25 @@ window.KSK = window.KSK || {};
     },
 
     getTrainerFreeWindows: function (trainerId, isoDate, bookingsForDate) {
-      var shift = this.getTrainerShiftForDate(trainerId, isoDate);
-      var safeResult = {
-        shift: shift,
-        windows: [],
-        startSlots: [],
-        hasCapacity: false,
-        isFullyBooked: false
-      };
-      var shiftStart;
-      var shiftEnd;
-      var busyIntervals;
-      var mergedBusy;
-      var windows = [];
-      var startSlots = [];
-      var cursor;
-
-      if (!trainerId || !isoDate) {
-        return safeResult;
-      }
-
-      if (shift.isOff) {
-        return safeResult;
-      }
-
-      shiftStart = parseTimeToMinutes(shift.start);
-      shiftEnd = parseTimeToMinutes(shift.end);
-      if (Number.isNaN(shiftStart) || Number.isNaN(shiftEnd) || shiftEnd <= shiftStart) {
-        return safeResult;
-      }
-
-      busyIntervals = (Array.isArray(bookingsForDate) ? bookingsForDate : this.getBookings(isoDate))
-        .filter(function (booking) {
-          return booking
-            && booking.status !== "cancelled"
-            && booking.trainerId === trainerId;
-        })
-        .map(function (booking) {
-          var start = parseTimeToMinutes(booking.time);
-          var end = start + Number(booking.duration);
-          var clippedStart;
-          var clippedEnd;
-
-          if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
-            return null;
-          }
-
-          clippedStart = Math.max(start, shiftStart);
-          clippedEnd = Math.min(end, shiftEnd);
-          if (clippedEnd <= clippedStart) {
-            return null;
-          }
-
-          return {
-            start: clippedStart,
-            end: clippedEnd
-          };
-        })
-        .filter(Boolean)
-        .sort(function (a, b) {
-          if (a.start !== b.start) {
-            return a.start - b.start;
-          }
-          return a.end - b.end;
-        });
-
-      mergedBusy = [];
-      busyIntervals.forEach(function (interval) {
-        var previous = mergedBusy[mergedBusy.length - 1];
-
-        if (!previous || interval.start > previous.end) {
-          mergedBusy.push({
-            start: interval.start,
-            end: interval.end
-          });
-          return;
-        }
-
-        previous.end = Math.max(previous.end, interval.end);
-      });
-
-      cursor = shiftStart;
-      mergedBusy.forEach(function (interval) {
-        if (interval.start > cursor) {
-          windows.push({
-            start: formatTime(cursor),
-            end: formatTime(interval.start),
-            duration: interval.start - cursor
-          });
-        }
-        cursor = Math.max(cursor, interval.end);
-      });
-
-      if (cursor < shiftEnd) {
-        windows.push({
-          start: formatTime(cursor),
-          end: formatTime(shiftEnd),
-          duration: shiftEnd - cursor
-        });
-      }
-
-      windows.forEach(function (windowMeta) {
-        var windowStart = parseTimeToMinutes(windowMeta.start);
-        var windowEnd = parseTimeToMinutes(windowMeta.end);
-        var minute;
-
-        for (minute = windowStart; minute + 30 <= windowEnd; minute += 15) {
-          startSlots.push(formatTime(minute));
-        }
-      });
+      var meta = buildTrainerFreeWindowMeta(trainerId, isoDate, bookingsForDate);
 
       return {
-        shift: shift,
-        windows: windows,
-        startSlots: startSlots,
-        hasCapacity: startSlots.length > 0,
-        isFullyBooked: startSlots.length === 0
+        shift: meta.shift,
+        windows: meta.windows,
+        startSlots: meta.startSlots,
+        hasCapacity: meta.hasCapacity,
+        isFullyBooked: meta.startSlots.length === 0
+      };
+    },
+
+    getTrainerSelectableHourSlots: function (trainerId, isoDate, bookingsForDate) {
+      var meta = buildTrainerFreeWindowMeta(trainerId, isoDate, bookingsForDate);
+
+      return {
+        shift: meta.shift,
+        startSlots: meta.startSlots,
+        hasCapacity: meta.hasCapacity,
+        isOff: meta.shift.isOff
       };
     },
 
