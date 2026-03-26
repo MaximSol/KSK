@@ -3,6 +3,7 @@ window.KSK = window.KSK || {};
 (function () {
   var KSK = window.KSK;
   var Utils = KSK.Utils;
+  var HORSE_REST_GAP_MINUTES = 60;
 
   function findById(items, id) {
     return items.find(function (item) {
@@ -12,6 +13,14 @@ window.KSK = window.KSK || {};
 
   function getBookingLabel(booking) {
     return booking.time + "–" + Utils.addMinutes(booking.time, booking.duration);
+  }
+
+  function isScheduleInsightsEnabled() {
+    return !(
+      KSK.App
+      && typeof KSK.App.isScheduleInsightsEnabled === "function"
+      && KSK.App.isScheduleInsightsEnabled() === false
+    );
   }
 
   function activeBookingsForDate(allBookings, booking) {
@@ -105,6 +114,9 @@ window.KSK = window.KSK || {};
 
       if (booking.horseId) {
         var horse = findById(horses, booking.horseId);
+        var horseCandidates = activeBookingsForDate(bookings, booking).filter(function (item) {
+          return item.horseId === booking.horseId;
+        });
         var horseConflict = candidates.find(function (item) {
           return item.horseId === booking.horseId;
         });
@@ -125,9 +137,7 @@ window.KSK = window.KSK || {};
           });
         }
         if (horse) {
-          var horseDayCount = activeBookingsForDate(bookings, booking).filter(function (item) {
-            return item.horseId === booking.horseId;
-          }).length + 1;
+          var horseDayCount = horseCandidates.length + 1;
           if (horseDayCount >= Number(horse.maxDailyLoad)) {
             conflicts.push({
               type: "horseDailyLoad",
@@ -136,6 +146,46 @@ window.KSK = window.KSK || {};
               conflictWith: null
             });
           }
+        }
+        if (horse && isScheduleInsightsEnabled()) {
+          var bookingStart = Utils.parseTimeToMinutes(booking.time);
+          var bookingEnd = bookingStart + Number(booking.duration);
+
+          horseCandidates.forEach(function (item) {
+            var itemStart = Utils.parseTimeToMinutes(item.time);
+            var itemEnd = itemStart + Number(item.duration);
+            var gapMinutes;
+            var message;
+
+            if (Number.isNaN(bookingStart) || Number.isNaN(bookingEnd) || Number.isNaN(itemStart) || Number.isNaN(itemEnd)) {
+              return;
+            }
+
+            if (bookingStart < itemEnd && itemStart < bookingEnd) {
+              return;
+            }
+
+            if (bookingStart >= itemEnd) {
+              gapMinutes = bookingStart - itemEnd;
+              if (gapMinutes < HORSE_REST_GAP_MINUTES) {
+                message = "Лошади " + horse.name + " нужен 1 час отдыха после " + getBookingLabel(item);
+              }
+            } else if (itemStart >= bookingEnd) {
+              gapMinutes = itemStart - bookingEnd;
+              if (gapMinutes < HORSE_REST_GAP_MINUTES) {
+                message = "Лошади " + horse.name + " нужен 1 час отдыха перед " + getBookingLabel(item);
+              }
+            }
+
+            if (message) {
+              conflicts.push({
+                type: "horseRestGap",
+                severity: "warning",
+                message: message,
+                conflictWith: item.id
+              });
+            }
+          });
         }
       }
 

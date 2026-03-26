@@ -4,6 +4,7 @@ window.KSK = window.KSK || {};
   var KSK = window.KSK;
   var STORAGE_PREFIX = "ksk_";
   var STORAGE_KEYS = ["trainers", "trainerSchedules", "horses", "grooms", "arenas", "bookings"];
+  var HORSE_REST_GAP_MINUTES = 60;
 
   var TRAINERS = [
     { id: "t1", name: "Ольга", color: "#4A90D9" },
@@ -267,6 +268,108 @@ window.KSK = window.KSK || {};
     };
   }
 
+  function buildHorseSelectableHourMeta(horseId, isoDate, duration, bookingsForDate) {
+    var horses = KSK.Data.getHorses();
+    var horse = horses.find(function (item) {
+      return item.id === horseId;
+    }) || null;
+    var maxDailyLoad = horse ? Number(horse.maxDailyLoad) : 0;
+    var safeResult = {
+      summary: {
+        horseStatus: horse ? horse.status : null,
+        horseStatusLabel: horse ? KSK.Utils.HORSE_STATUS_LABELS[horse.status] : "",
+        dayLoad: 0,
+        maxDailyLoad: maxDailyLoad,
+        restGapMinutes: HORSE_REST_GAP_MINUTES
+      },
+      startSlots: [],
+      hasCapacity: false,
+      isUnavailable: false,
+      isFullyBooked: false
+    };
+    var effectiveDuration;
+    var activeHorseBookings;
+    var startSlots = [];
+
+    function fitsBetweenBookings(candidateStart, candidateEnd, otherStart, otherEnd) {
+      if (candidateStart < otherEnd && otherStart < candidateEnd) {
+        return false;
+      }
+      if (candidateStart >= otherEnd) {
+        return candidateStart - otherEnd >= HORSE_REST_GAP_MINUTES;
+      }
+      if (otherStart >= candidateEnd) {
+        return otherStart - candidateEnd >= HORSE_REST_GAP_MINUTES;
+      }
+      return true;
+    }
+
+    if (!horseId || !isoDate) {
+      return safeResult;
+    }
+
+    if (!horse) {
+      return safeResult;
+    }
+
+    if (horse.status !== "available") {
+      safeResult.isUnavailable = true;
+      return safeResult;
+    }
+
+    activeHorseBookings = (Array.isArray(bookingsForDate) ? bookingsForDate : KSK.Data.getBookings(isoDate))
+      .filter(function (booking) {
+        return booking
+          && booking.status !== "cancelled"
+          && booking.horseId === horseId;
+      })
+      .map(function (booking) {
+        var start = parseTimeToMinutes(booking.time);
+        var end = start + Number(booking.duration);
+
+        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+          return null;
+        }
+
+        return {
+          start: start,
+          end: end
+        };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) {
+        if (a.start !== b.start) {
+          return a.start - b.start;
+        }
+        return a.end - b.end;
+      });
+
+    safeResult.summary.dayLoad = activeHorseBookings.length;
+
+    if (activeHorseBookings.length >= maxDailyLoad) {
+      safeResult.isFullyBooked = true;
+      return safeResult;
+    }
+
+    effectiveDuration = Number(duration) === 30 || Number(duration) === 45 ? Number(duration) : 45;
+
+    KSK.Utils.HOURS.forEach(function (hour) {
+      var candidateStart = hour * 60;
+      var candidateEnd = candidateStart + effectiveDuration;
+      var isSelectable = candidateEnd <= KSK.Utils.DAY_END && activeHorseBookings.every(function (other) {
+        return fitsBetweenBookings(candidateStart, candidateEnd, other.start, other.end);
+      });
+
+      if (isSelectable) {
+        startSlots.push(formatTime(candidateStart));
+      }
+    });
+
+    safeResult.startSlots = startSlots;
+    safeResult.hasCapacity = startSlots.length > 0;
+    return safeResult;
+  }
+
   function formatDateLabel(isoDate, options) {
     return toDate(isoDate).toLocaleDateString("ru-RU", options || {
       day: "numeric",
@@ -516,6 +619,10 @@ window.KSK = window.KSK || {};
         hasCapacity: meta.hasCapacity,
         isOff: meta.shift.isOff
       };
+    },
+
+    getHorseSelectableHourSlots: function (horseId, isoDate, duration, bookingsForDate) {
+      return buildHorseSelectableHourMeta(horseId, isoDate, duration, bookingsForDate);
     },
 
     checkTrainerAvailability: function (trainerId, isoDate, time, duration) {

@@ -137,6 +137,13 @@
               <div class="col-md-6">
                 <label class="form-label" for="booking-horse-id">Лошадь</label>
                 <select id="booking-horse-id" class="form-select"></select>
+                <div class="form-text" id="booking-horse-availability">
+                  Доступность лошади появится после выбора даты и лошади
+                </div>
+                <div id="booking-horse-slot-picker" class="booking-slot-picker d-none" hidden>
+                  <div class="booking-slot-picker__label">Свободное время</div>
+                  <div id="booking-horse-slot-buttons" class="booking-slot-picker__list" aria-label="Свободные старты лошади"></div>
+                </div>
               </div>
               <div class="col-md-6">
                 <label class="form-label" for="booking-groom-id">Коновод</label>

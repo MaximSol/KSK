@@ -436,11 +436,16 @@ window.KSK = window.KSK || {};
     return count + " " + Utils.pluralize(count, ["окно", "окна", "окон"]);
   }
 
+  function formatStartCount(count) {
+    return count + " " + Utils.pluralize(count, ["свободный старт", "свободных старта", "свободных стартов"]);
+  }
+
   function createBookingCardState(booking, options) {
     var dayBookings = options.dayBookings || KSK.Data.getBookings(booking.date);
     var lookups = options.lookups || createLookups();
     var names = getBookingNames(booking, lookups);
     var enhanced = KSK.App.isScheduleInsightsEnabled();
+    var previewBookingId = enhanced ? KSK.App.state.previewBookingId : null;
     var conflicts = KSK.Conflicts.checkConflicts(booking, dayBookings);
     var paymentChipText = getFinancialChipText(booking);
     var trainerScheduleEnabled = KSK.App.isTrainerScheduleEnabled();
@@ -456,6 +461,8 @@ window.KSK = window.KSK || {};
       lookups: lookups,
       names: names,
       enhanced: enhanced,
+      hasPreview: Boolean(previewBookingId),
+      isPreview: previewBookingId === booking.id,
       relevant: isCardRelevant(booking, dayBookings),
       dealLabel: getDealLabel(booking),
       conflicts: conflicts,
@@ -491,11 +498,19 @@ window.KSK = window.KSK || {};
       card.classList.add("booking-card--conflict");
       card.dataset.hasConflicts = "true";
     }
-    if (cardState.enhanced && KSK.App.state.selectedBookingId === booking.id) {
-      card.classList.add("booking-card--selected");
-    }
-    if (cardState.enhanced && KSK.App.state.focusFilter !== "all" && !cardState.relevant) {
-      card.classList.add("booking-card--muted");
+    if (cardState.enhanced && cardState.hasPreview) {
+      if (cardState.isPreview) {
+        card.classList.add("booking-card--selected");
+      } else {
+        card.classList.add("booking-card--muted");
+      }
+    } else {
+      if (cardState.enhanced && KSK.App.state.selectedBookingId === booking.id) {
+        card.classList.add("booking-card--selected");
+      }
+      if (cardState.enhanced && KSK.App.state.focusFilter !== "all" && !cardState.relevant) {
+        card.classList.add("booking-card--muted");
+      }
     }
 
     card.dataset.bookingId = booking.id;
@@ -664,6 +679,62 @@ window.KSK = window.KSK || {};
     return availability;
   }
 
+  function renderHorseWeekAvailability(meta, options) {
+    var availability = el("div", "calendar-week-cell__availability");
+    var quickslots = el("div", "calendar-week-quickslots");
+    var visibleSlots;
+    var overflowCount;
+    var horseLabel = "лошадь " + options.horseName;
+    var horseStatus = meta && meta.summary ? meta.summary.horseStatus : null;
+
+    if (!meta) {
+      return availability;
+    }
+
+    if (meta.isUnavailable) {
+      availability.appendChild(el("div", "calendar-week-cell__status", horseStatus === "rest" ? "Отдых" : "Лечение"));
+      return availability;
+    }
+
+    if (!meta.startSlots.length) {
+      availability.appendChild(el("div", "calendar-week-cell__status", "Окон нет"));
+      return availability;
+    }
+
+    visibleSlots = meta.startSlots.slice(0, 3);
+    overflowCount = Math.max(meta.startSlots.length - visibleSlots.length, 0);
+
+    visibleSlots.forEach(function (time) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "calendar-week-quickslot";
+      button.dataset.action = "create-week-booking";
+      button.dataset.date = options.date;
+      button.dataset.time = time;
+      button.dataset.resourceType = "horses";
+      button.dataset.resourceId = options.horseId;
+      button.setAttribute("aria-label", "Создать занятие, " + Utils.formatShortDate(options.date) + " " + time + ", " + horseLabel);
+      button.textContent = time;
+      quickslots.appendChild(button);
+    });
+
+    if (overflowCount > 0) {
+      var moreButton = document.createElement("button");
+      moreButton.type = "button";
+      moreButton.className = "calendar-week-quickslot calendar-week-quickslot--more";
+      moreButton.dataset.action = "open-week-overflow";
+      moreButton.dataset.date = options.date;
+      moreButton.dataset.resourceType = "horses";
+      moreButton.dataset.resourceId = options.horseId;
+      moreButton.setAttribute("aria-label", "Открыть день " + Utils.formatShortDate(options.date) + " по " + horseLabel + " и увидеть все свободные старты");
+      moreButton.textContent = "+" + overflowCount;
+      quickslots.appendChild(moreButton);
+    }
+
+    availability.appendChild(quickslots);
+    return availability;
+  }
+
   KSK.Calendar = {
     init: function () {
       container = document.getElementById("calendar-container");
@@ -806,6 +877,7 @@ window.KSK = window.KSK || {};
       var gridVisibleBookings = options && options.gridVisibleBookings ? options.gridVisibleBookings : allPeriodBookings;
       var viewType = options && options.viewType ? options.viewType : "";
       var trainerWeekSummary = options && options.trainerWeekSummary ? options.trainerWeekSummary : null;
+      var horseWeekSummary = options && options.horseWeekSummary ? options.horseWeekSummary : null;
 
       if (!KSK.App.isScheduleInsightsEnabled()) {
         this.renderLegacyWeekView(startDate, allPeriodBookings, weekDates);
@@ -813,7 +885,7 @@ window.KSK = window.KSK || {};
       }
 
       if (viewType === "trainers" || viewType === "horses") {
-        this.renderResourceWeekView(startDate, gridVisibleBookings, viewType, weekDates, allPeriodBookings, trainerWeekSummary);
+        this.renderResourceWeekView(startDate, gridVisibleBookings, viewType, weekDates, allPeriodBookings, trainerWeekSummary, horseWeekSummary);
         return;
       }
 
@@ -882,7 +954,7 @@ window.KSK = window.KSK || {};
       this.highlightCurrentHour();
     },
 
-    renderResourceWeekView: function (startDate, gridVisibleBookings, resourceType, weekDates, allPeriodBookings, trainerWeekSummary) {
+    renderResourceWeekView: function (startDate, gridVisibleBookings, resourceType, weekDates, allPeriodBookings, trainerWeekSummary, horseWeekSummary) {
       var fragment = document.createDocumentFragment();
       var scroll = el("div", "calendar-scroll");
       var matrix = el("div", "calendar-week-matrix");
@@ -899,6 +971,8 @@ window.KSK = window.KSK || {};
       var isTrainerAvailabilityWeek = resourceType === "trainers"
         && KSK.App.isTrainerScheduleEnabled()
         && trainerWeekSummary;
+      var isHorseAvailabilityWeek = resourceType === "horses"
+        && horseWeekSummary;
 
       matrix.style.setProperty("--ksk-week-day-count", String(weekDates.length));
       matrix.appendChild(el("div", "calendar-week-corner", Utils.VIEW_LABELS[resourceType]));
@@ -944,6 +1018,8 @@ window.KSK = window.KSK || {};
 
         if (isTrainerAvailabilityWeek) {
           metaLabel += " • " + formatWindowCount(trainerWeekSummary.dayWindowCounts[date]);
+        } else if (isHorseAvailabilityWeek) {
+          metaLabel += " • " + formatStartCount(horseWeekSummary.dayStartCounts[date]);
         }
 
         header.appendChild(el("div", "calendar-week-day-header__title", Utils.toDate(date).toLocaleDateString("ru-RU", {
@@ -966,6 +1042,8 @@ window.KSK = window.KSK || {};
 
         if (isTrainerAvailabilityWeek) {
           headerMeta += " • " + formatWindowCount(trainerWeekSummary.trainerWindowCounts[resource.id]);
+        } else if (isHorseAvailabilityWeek) {
+          headerMeta += " • " + formatStartCount(horseWeekSummary.horseStartCounts[resource.id]);
         }
 
         resourceHeader.dataset.resourceId = resource.id;
@@ -978,10 +1056,14 @@ window.KSK = window.KSK || {};
           var cell = el("div", "calendar-week-cell");
           var dayBookings = isTrainerAvailabilityWeek
             ? trainerWeekSummary.bookingsByDate[date]
-            : (allBookingsByDate[date] || []);
+            : isHorseAvailabilityWeek
+              ? horseWeekSummary.bookingsByDate[date]
+              : (allBookingsByDate[date] || []);
           var freeMeta = isTrainerAvailabilityWeek
             ? trainerWeekSummary.freeMetaByTrainerAndDate[resource.id][date]
-            : null;
+            : isHorseAvailabilityWeek
+              ? horseWeekSummary.freeMetaByHorseAndDate[resource.id][date]
+              : null;
           var shiftLine;
           var availabilityNode;
 
@@ -1023,6 +1105,36 @@ window.KSK = window.KSK || {};
               date: date,
               trainerId: resource.id,
               trainerName: resource.name
+            });
+            if (availabilityNode) {
+              cell.appendChild(availabilityNode);
+            }
+          } else if (isHorseAvailabilityWeek) {
+            if (freeMeta.isUnavailable) {
+              cell.classList.add("calendar-week-cell--off");
+            }
+            if (!freeMeta.isUnavailable && !freeMeta.startSlots.length) {
+              cell.classList.add("calendar-week-cell--full");
+            }
+            if (!cellBookings.length) {
+              cell.classList.add("calendar-week-cell--empty");
+            }
+
+            if (cellBookings.length) {
+              cellBookings.forEach(function (booking) {
+                cell.appendChild(renderWeekListBookingCard(booking, {
+                  resourceType: resourceType,
+                  resourceId: resource.id,
+                  dayBookings: dayBookings,
+                  lookups: lookups
+                }));
+              });
+            }
+
+            availabilityNode = renderHorseWeekAvailability(freeMeta, {
+              date: date,
+              horseId: resource.id,
+              horseName: resource.name
             });
             if (availabilityNode) {
               cell.appendChild(availabilityNode);
@@ -1179,8 +1291,7 @@ window.KSK = window.KSK || {};
             date: target.dataset.date,
             time: target.dataset.time,
             resourceType: target.dataset.resourceType,
-            resourceId: target.dataset.resourceId,
-            trainerId: target.dataset.resourceId
+            resourceId: target.dataset.resourceId
           });
           return;
         }

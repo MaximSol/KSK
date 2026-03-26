@@ -8,6 +8,7 @@ window.KSK = window.KSK || {};
     horse: "booking-horse-id",
     horseStatus: "booking-horse-id",
     horseDailyLoad: "booking-horse-id",
+    horseRestGap: "booking-horse-id",
     groom: "booking-groom-id",
     arena: "booking-arena-id"
   };
@@ -195,6 +196,24 @@ window.KSK = window.KSK || {};
     return "График тренера появится после выбора даты и тренера";
   }
 
+  function getHorseAvailabilityPrompt() {
+    return "Доступность лошади появится после выбора даты и лошади";
+  }
+
+  function isScheduleInsightsEnabled() {
+    return KSK.App && typeof KSK.App.isScheduleInsightsEnabled === "function" && KSK.App.isScheduleInsightsEnabled();
+  }
+
+  function getBookingsForDate(raw) {
+    if (!raw || !raw.date) {
+      return null;
+    }
+
+    return KSK.Data.getBookings(raw.date).filter(function (booking) {
+      return booking.id !== raw.id;
+    });
+  }
+
   function getTrainerAvailabilityMessage(availability) {
     if (!availability || availability.isAvailable) {
       return "";
@@ -243,17 +262,12 @@ window.KSK = window.KSK || {};
 
   function getTrainerSelectableMeta(raw) {
     var enabled = KSK.App && typeof KSK.App.isTrainerScheduleEnabled === "function" && KSK.App.isTrainerScheduleEnabled();
-    var bookingsForDate;
 
     if (!enabled || !raw || !raw.date || !raw.trainerId) {
       return null;
     }
 
-    bookingsForDate = KSK.Data.getBookings(raw.date).filter(function (booking) {
-      return booking.id !== raw.id;
-    });
-
-    return KSK.Data.getTrainerSelectableHourSlots(raw.trainerId, raw.date, bookingsForDate);
+    return KSK.Data.getTrainerSelectableHourSlots(raw.trainerId, raw.date, getBookingsForDate(raw));
   }
 
   function renderTrainerSlotPicker(raw) {
@@ -289,6 +303,134 @@ window.KSK = window.KSK || {};
 
     buttons.replaceChildren(fragment);
 
+    picker.hidden = false;
+    picker.classList.remove("d-none");
+  }
+
+  function formatHorseOptionLabel(horse, selectableMeta) {
+    if (horse.status !== "available") {
+      return horse.name + " - " + Utils.HORSE_STATUS_LABELS[horse.status];
+    }
+
+    if (!selectableMeta) {
+      return horse.name;
+    }
+
+    if (selectableMeta.isFullyBooked) {
+      return horse.name + " - лимит";
+    }
+
+    if (!selectableMeta.isUnavailable && !selectableMeta.startSlots.length) {
+      return horse.name + " - окон нет";
+    }
+
+    return horse.name;
+  }
+
+  function populateHorseOptions(raw) {
+    var select = getInput("booking-horse-id");
+    var selectedValue = select.value;
+    var horses = KSK.Data.getHorses();
+    var enabled = isScheduleInsightsEnabled();
+    var bookingsForDate = enabled && raw && raw.date ? getBookingsForDate(raw) : null;
+    var options = [optionHtml("", "Без лошади")].concat(horses.map(function (horse) {
+      var label = horse.name;
+
+      if (enabled) {
+        label = formatHorseOptionLabel(
+          horse,
+          raw && raw.date
+            ? KSK.Data.getHorseSelectableHourSlots(horse.id, raw.date, raw.duration, bookingsForDate)
+            : null
+        );
+      }
+
+      return optionHtml(horse.id, label);
+    }));
+
+    setOptions(select, options);
+    select.value = horses.some(function (horse) {
+      return horse.id === selectedValue;
+    }) ? selectedValue : "";
+  }
+
+  function getHorseSelectableMeta(raw) {
+    if (!isScheduleInsightsEnabled() || !raw || !raw.date || !raw.horseId) {
+      return null;
+    }
+
+    return KSK.Data.getHorseSelectableHourSlots(raw.horseId, raw.date, raw.duration, getBookingsForDate(raw));
+  }
+
+  function renderHorseAvailabilityHint(raw) {
+    var helper = elements["booking-horse-availability"];
+    var meta;
+
+    if (!helper) {
+      return;
+    }
+
+    helper.hidden = !isScheduleInsightsEnabled();
+    if (!isScheduleInsightsEnabled()) {
+      return;
+    }
+
+    if (!raw.date || !raw.horseId) {
+      helper.textContent = getHorseAvailabilityPrompt();
+      return;
+    }
+
+    meta = getHorseSelectableMeta(raw);
+    if (!meta) {
+      helper.textContent = getHorseAvailabilityPrompt();
+      return;
+    }
+
+    if (meta.isUnavailable) {
+      helper.textContent = "Лошадь недоступна: " + meta.summary.horseStatusLabel;
+      return;
+    }
+
+    if (meta.isFullyBooked) {
+      helper.textContent = "Лошадь достигла дневной нагрузки: " + meta.summary.dayLoad + "/" + meta.summary.maxDailyLoad;
+      return;
+    }
+
+    helper.textContent = "Лошадь доступна • " + meta.summary.dayLoad + "/" + meta.summary.maxDailyLoad + " занятий • нужен 1 час отдыха";
+  }
+
+  function renderHorseSlotPicker(raw) {
+    var picker = elements["booking-horse-slot-picker"];
+    var buttons = elements["booking-horse-slot-buttons"];
+    var selectableMeta = getHorseSelectableMeta(raw);
+    var fragment;
+
+    if (!picker || !buttons) {
+      return;
+    }
+
+    if (!isScheduleInsightsEnabled() || !selectableMeta || !selectableMeta.startSlots.length) {
+      picker.hidden = true;
+      picker.classList.add("d-none");
+      buttons.replaceChildren();
+      return;
+    }
+
+    fragment = document.createDocumentFragment();
+    selectableMeta.startSlots.forEach(function (slot) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-sm btn-outline-primary booking-slot-picker__button";
+      if (raw.time === slot) {
+        button.classList.add("active");
+      }
+      button.dataset.slotTime = slot;
+      button.textContent = slot;
+      button.setAttribute("aria-label", "Поставить время " + slot);
+      fragment.appendChild(button);
+    });
+
+    buttons.replaceChildren(fragment);
     picker.hidden = false;
     picker.classList.remove("d-none");
   }
@@ -659,6 +801,20 @@ window.KSK = window.KSK || {};
     modalInstance.hide();
   }
 
+  function getDefaultNewBookingArenaId() {
+    var arenas = KSK.Data.getArenas();
+    var arena = arenas.find(function (item) {
+      return item.name === "Большой манеж";
+    });
+    return arena ? arena.id : "";
+  }
+
+  function getPrefillValue(prefill, key, fallback) {
+    return prefill && Object.prototype.hasOwnProperty.call(prefill, key)
+      ? prefill[key]
+      : fallback;
+  }
+
   KSK.Booking = {
     init: function () {
       [
@@ -677,6 +833,9 @@ window.KSK = window.KSK || {};
         "booking-trainer-slot-picker",
         "booking-trainer-slot-buttons",
         "booking-horse-id",
+        "booking-horse-availability",
+        "booking-horse-slot-picker",
+        "booking-horse-slot-buttons",
         "booking-groom-id",
         "booking-arena-id",
         "booking-notes",
@@ -717,6 +876,17 @@ window.KSK = window.KSK || {};
         getInput("booking-time").dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+      elements["booking-horse-slot-buttons"].addEventListener("click", function (event) {
+        var button = event.target.closest("button[data-slot-time]");
+
+        if (!button) {
+          return;
+        }
+
+        getInput("booking-time").value = button.dataset.slotTime;
+        getInput("booking-time").dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
       getAllFormFields().forEach(function (field) {
         var eventName = field.tagName === "INPUT" || field.tagName === "TEXTAREA" ? "input" : "change";
         var handler = function () {
@@ -727,14 +897,24 @@ window.KSK = window.KSK || {};
           }
           if (field.id === "booking-date") {
             populateTrainerOptions(raw);
+            populateHorseOptions(raw);
             raw = collectFormData();
           }
           if (field.id === "booking-date" || field.id === "booking-trainer-id" || field.id === "booking-time") {
             renderTrainerSlotPicker(raw);
             raw = collectFormData();
           }
+          if (field.id === "booking-duration") {
+            populateHorseOptions(raw);
+            raw = collectFormData();
+          }
+          if (field.id === "booking-date" || field.id === "booking-duration" || field.id === "booking-horse-id" || field.id === "booking-time") {
+            renderHorseSlotPicker(raw);
+            raw = collectFormData();
+          }
           updateBitrixDealLink(raw);
           renderTrainerAvailabilityHint(raw);
+          renderHorseAvailabilityHint(raw);
           KSK.Booking._validateForm();
           elements["booking-modal-subtitle"].textContent = formatModalSubtitle(collectFormData());
         };
@@ -769,15 +949,15 @@ window.KSK = window.KSK || {};
 
     openNew: function (prefill) {
       var draft = {
-        date: (prefill && prefill.date) || KSK.App.state.currentDate,
-        time: (prefill && prefill.time) || "",
-        duration: "",
-        serviceType: "",
+        date: getPrefillValue(prefill, "date", KSK.App.state.currentDate),
+        time: getPrefillValue(prefill, "time", ""),
+        duration: getPrefillValue(prefill, "duration", 45),
+        serviceType: getPrefillValue(prefill, "serviceType", "training"),
         clientName: "",
         trainerId: "",
         horseId: "",
         groomId: "",
-        arenaId: "",
+        arenaId: getPrefillValue(prefill, "arenaId", getDefaultNewBookingArenaId()),
         notes: "",
         paymentType: "",
         paymentStatus: "",
@@ -865,7 +1045,10 @@ window.KSK = window.KSK || {};
       getInput("booking-bitrix-deal-url").value = booking.bitrixDealUrl || "";
       getInput("booking-bitrix-deal-label").value = booking.bitrixDealLabel || "";
       populateTrainerOptions(collectFormData());
+      populateHorseOptions(collectFormData());
       renderTrainerSlotPicker(collectFormData());
+      renderHorseAvailabilityHint(collectFormData());
+      renderHorseSlotPicker(collectFormData());
 
       updatePaymentFieldVisibility(booking);
       elements["booking-modal-subtitle"].textContent = formatModalSubtitle(booking);
