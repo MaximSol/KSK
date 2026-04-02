@@ -3,7 +3,7 @@ window.KSK = window.KSK || {};
 (function () {
   var KSK = window.KSK;
   var STORAGE_PREFIX = "ksk_";
-  var STORAGE_KEYS = ["trainers", "trainerSchedules", "horses", "grooms", "arenas", "bookings"];
+  var STORAGE_KEYS = ["trainers", "trainerSchedules", "horses", "grooms", "arenas", "services", "bookings"];
   var HORSE_REST_GAP_MINUTES = 60;
 
   var TRAINERS = [
@@ -50,22 +50,43 @@ window.KSK = window.KSK || {};
     { id: "a2", name: "Большой манеж", capacity: 10 }
   ];
 
+  var SERVICES = [
+    { id: "1", name: "Аренда лошади (30 мин)", duration: 30, requiresGroom: false, legacyServiceType: "rental" },
+    { id: "3", name: "Аренда лошади (45 мин)", duration: 45, requiresGroom: false, legacyServiceType: "rental" },
+    { id: "5", name: "Обучение ВЕ детей с 6 до 13 лет (45 мин)", duration: 45, requiresGroom: false, legacyServiceType: "training" },
+    { id: "7", name: "Обучение ВЕ (взрослые, 45 мин)", duration: 45, requiresGroom: false, legacyServiceType: "training" },
+    { id: "9", name: "Иппотерапия (будни)", duration: 30, requiresGroom: true, legacyServiceType: "training" },
+    { id: "13", name: "Обучение ВЕ детей с 6 до 13 лет (30 мин)", duration: 30, requiresGroom: false, legacyServiceType: "training" },
+    { id: "15", name: "Обучение ВЕ (взрослые, 45 мин)", duration: 45, requiresGroom: false, legacyServiceType: "training" }
+  ];
+
+  var LEGACY_SERVICE_DEFAULTS = {
+    training: {
+      30: "9",
+      45: "7"
+    },
+    rental: {
+      30: "1",
+      45: "3"
+    }
+  };
+
   var BOOKINGS = [
-    { id: "b1", date: "2026-03-16", time: "09:00", duration: 45, clientName: "Горожанинова Виктория", serviceType: "training", trainerId: "t4", horseId: "h7", groomId: "g1", arenaId: "a1", status: "confirmed", notes: "", bitrixDealUrl: "https://dubrava.bitrix24.ru/crm/deal/details/123/", bitrixDealLabel: "D123", paymentType: "single", paymentStatus: "paid", singlePrice: 3200 },
-    { id: "b2", date: "2026-03-16", time: "09:15", duration: 45, clientName: "Ушакова Анна", serviceType: "training", trainerId: "t2", horseId: "h2", groomId: null, arenaId: "a1", status: "draft", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
-    { id: "b3", date: "2026-03-16", time: "10:00", duration: 30, clientName: "Волкова Юлия", serviceType: "rental", trainerId: "t3", horseId: "h3", groomId: null, arenaId: "a2", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 5 },
-    { id: "b4", date: "2026-03-16", time: "18:00", duration: 45, clientName: "Козлова Мария", serviceType: "training", trainerId: "t1", horseId: "h1", groomId: "g2", arenaId: "a2", status: "completed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3000 },
-    { id: "b5", date: "2026-03-17", time: "09:00", duration: 30, clientName: "Сафонова Елена", serviceType: "training", trainerId: "t6", horseId: "h8", groomId: null, arenaId: "a1", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "unpaid", singlePrice: 2800 },
-    { id: "b6", date: "2026-03-17", time: "09:00", duration: 45, clientName: "Романова Алиса", serviceType: "training", trainerId: "t8", horseId: "h10", groomId: "g3", arenaId: "a2", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 3 },
-    { id: "b7", date: "2026-03-18", time: "11:00", duration: 30, clientName: "Петрова София", serviceType: "training", trainerId: "t7", horseId: "h5", groomId: null, arenaId: "a1", status: "confirmed", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
-    { id: "b8", date: "2026-03-18", time: "11:00", duration: 45, clientName: "Иванова Полина", serviceType: "training", trainerId: "t9", horseId: "h9", groomId: "g4", arenaId: "a2", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3500 },
-    { id: "b9", date: "2026-03-19", time: "09:00", duration: 45, clientName: "Горожанинова Виктория", serviceType: "training", trainerId: "t4", horseId: "h7", groomId: null, arenaId: "a1", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3200 },
-    { id: "b10", date: "2026-03-19", time: "09:30", duration: 30, clientName: "Чернова Дарья", serviceType: "training", trainerId: "t4", horseId: "h4", groomId: null, arenaId: "a1", status: "confirmed", notes: "Пересечение по тренеру для демонстрации conflict UI", paymentType: "single", paymentStatus: "unpaid", singlePrice: 2900 },
-    { id: "b11", date: "2026-03-19", time: "10:15", duration: 45, clientName: "Сидорова Таисия", serviceType: "rental", trainerId: "t2", horseId: "h2", groomId: "g1", arenaId: "a2", status: "confirmed", notes: "", bitrixDealUrl: "https://dubrava.bitrix24.ru/crm/deal/details/587/", bitrixDealLabel: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 2 },
-    { id: "b12", date: "2026-03-19", time: "17:30", duration: 45, clientName: "Клименко Ольга", serviceType: "training", trainerId: "t1", horseId: "h1", groomId: "g2", arenaId: "a2", status: "cancelled", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
-    { id: "b13", date: "2026-03-20", time: "09:00", duration: 45, clientName: "Морозова Ева", serviceType: "training", trainerId: "t5", horseId: "h6", groomId: "g5", arenaId: "a1", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 4 },
-    { id: "b14", date: "2026-03-20", time: "09:45", duration: 45, clientName: "Филиппова Ника", serviceType: "training", trainerId: "t10", horseId: "h11", groomId: null, arenaId: "a2", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3100 },
-    { id: "b15", date: "2026-03-21", time: "12:00", duration: 30, clientName: "Лебедева Анна", serviceType: "rental", trainerId: "t3", horseId: null, groomId: null, arenaId: "a1", status: "draft", notes: "Сценарий без лошади", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null }
+    { id: "b1", date: "2026-03-16", time: "09:00", duration: 45, clientName: "Горожанинова Виктория", serviceId: "7", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t4", horseId: "h7", groomId: "g1", arenaId: "a1", status: "confirmed", notes: "", bitrixDealUrl: "https://dubrava.bitrix24.ru/crm/deal/details/123/", bitrixDealLabel: "D123", paymentType: "single", paymentStatus: "paid", singlePrice: 3200 },
+    { id: "b2", date: "2026-03-16", time: "09:15", duration: 45, clientName: "Ушакова Анна", serviceId: "5", serviceName: "Обучение ВЕ детей с 6 до 13 лет (45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t2", horseId: "h2", groomId: null, arenaId: "a1", status: "draft", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
+    { id: "b3", date: "2026-03-16", time: "10:00", duration: 30, clientName: "Волкова Юлия", serviceId: "1", serviceName: "Аренда лошади (30 мин)", serviceDuration: 30, serviceRequiresGroom: false, serviceType: "rental", trainerId: "t3", horseId: "h3", groomId: null, arenaId: "a2", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 5 },
+    { id: "b4", date: "2026-03-16", time: "18:00", duration: 45, clientName: "Козлова Мария", serviceId: "7", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t1", horseId: "h1", groomId: "g2", arenaId: "a2", status: "completed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3000 },
+    { id: "b5", date: "2026-03-17", time: "09:00", duration: 30, clientName: "Сафонова Елена", serviceId: "9", serviceName: "Иппотерапия (будни)", serviceDuration: 30, serviceRequiresGroom: true, serviceType: "training", trainerId: "t6", horseId: "h8", groomId: "g2", arenaId: "a1", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "unpaid", singlePrice: 2800 },
+    { id: "b6", date: "2026-03-17", time: "09:00", duration: 45, clientName: "Романова Алиса", serviceId: "15", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t8", horseId: "h10", groomId: "g3", arenaId: "a2", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 3 },
+    { id: "b7", date: "2026-03-18", time: "11:00", duration: 30, clientName: "Петрова София", serviceId: "13", serviceName: "Обучение ВЕ детей с 6 до 13 лет (30 мин)", serviceDuration: 30, serviceRequiresGroom: false, serviceType: "training", trainerId: "t7", horseId: "h5", groomId: null, arenaId: "a1", status: "confirmed", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
+    { id: "b8", date: "2026-03-18", time: "11:00", duration: 45, clientName: "Иванова Полина", serviceId: "7", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t9", horseId: "h9", groomId: "g4", arenaId: "a2", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3500 },
+    { id: "b9", date: "2026-03-19", time: "09:00", duration: 45, clientName: "Горожанинова Виктория", serviceId: "15", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t4", horseId: "h7", groomId: null, arenaId: "a1", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3200 },
+    { id: "b10", date: "2026-03-19", time: "09:30", duration: 30, clientName: "Чернова Дарья", serviceId: "13", serviceName: "Обучение ВЕ детей с 6 до 13 лет (30 мин)", serviceDuration: 30, serviceRequiresGroom: false, serviceType: "training", trainerId: "t4", horseId: "h4", groomId: null, arenaId: "a1", status: "confirmed", notes: "Пересечение по тренеру для демонстрации conflict UI", paymentType: "single", paymentStatus: "unpaid", singlePrice: 2900 },
+    { id: "b11", date: "2026-03-19", time: "10:15", duration: 45, clientName: "Сидорова Таисия", serviceId: "3", serviceName: "Аренда лошади (45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "rental", trainerId: "t2", horseId: "h2", groomId: "g1", arenaId: "a2", status: "confirmed", notes: "", bitrixDealUrl: "https://dubrava.bitrix24.ru/crm/deal/details/587/", bitrixDealLabel: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 2 },
+    { id: "b12", date: "2026-03-19", time: "17:30", duration: 45, clientName: "Клименко Ольга", serviceId: "5", serviceName: "Обучение ВЕ детей с 6 до 13 лет (45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t1", horseId: "h1", groomId: "g2", arenaId: "a2", status: "cancelled", notes: "", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null },
+    { id: "b13", date: "2026-03-20", time: "09:00", duration: 45, clientName: "Морозова Ева", serviceId: "7", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t5", horseId: "h6", groomId: "g5", arenaId: "a1", status: "confirmed", notes: "", paymentType: "subscription", paymentStatus: "paid", subscriptionRemaining: 4 },
+    { id: "b14", date: "2026-03-20", time: "09:45", duration: 45, clientName: "Филиппова Ника", serviceId: "15", serviceName: "Обучение ВЕ (взрослые, 45 мин)", serviceDuration: 45, serviceRequiresGroom: false, serviceType: "training", trainerId: "t10", horseId: "h11", groomId: null, arenaId: "a2", status: "confirmed", notes: "", paymentType: "single", paymentStatus: "paid", singlePrice: 3100 },
+    { id: "b15", date: "2026-03-21", time: "12:00", duration: 30, clientName: "Лебедева Анна", serviceId: "1", serviceName: "Аренда лошади (30 мин)", serviceDuration: 30, serviceRequiresGroom: false, serviceType: "rental", trainerId: "t3", horseId: null, groomId: null, arenaId: "a1", status: "draft", notes: "Сценарий без лошади", paymentType: null, paymentStatus: null, singlePrice: null, subscriptionRemaining: null }
   ];
 
   var TRAINER_SCHEDULES = [
@@ -132,7 +153,14 @@ window.KSK = window.KSK || {};
   }
 
   function addMinutes(time, duration) {
-    return formatTime(parseTimeToMinutes(time) + duration);
+    var start = parseTimeToMinutes(time);
+    var minutesToAdd = Number(duration);
+
+    if (Number.isNaN(start) || Number.isNaN(minutesToAdd)) {
+      return "";
+    }
+
+    return formatTime(start + minutesToAdd);
   }
 
   function getShiftLabel(start, end) {
@@ -435,14 +463,154 @@ window.KSK = window.KSK || {};
     if (!raw) {
       return [];
     }
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      return [];
+    }
   }
 
   function write(name, value) {
     window.localStorage.setItem(getStorageKey(name), JSON.stringify(value));
   }
 
-  function normalizeBooking(booking) {
+  function normalizeServiceId(serviceId) {
+    return serviceId === null || serviceId === undefined ? "" : String(serviceId).trim();
+  }
+
+  function normalizeServiceType(serviceType) {
+    return serviceType === "training" || serviceType === "rental"
+      ? serviceType
+      : null;
+  }
+
+  function isValidServiceDuration(duration) {
+    return duration === 30 || duration === 45;
+  }
+
+  function isValidServiceShape(service) {
+    return Boolean(
+      service
+      && typeof service.id === "string"
+      && service.id.trim()
+      && typeof service.name === "string"
+      && service.name.trim()
+      && isValidServiceDuration(Number(service.duration))
+      && typeof service.requiresGroom === "boolean"
+      && normalizeServiceType(service.legacyServiceType)
+    );
+  }
+
+  function buildServiceByIdMap(services) {
+    var map = {};
+    var hasEntries = false;
+    var isValid = Array.isArray(services) && services.length > 0;
+
+    if (!Array.isArray(services) || !services.length) {
+      return {
+        isValid: false,
+        map: {}
+      };
+    }
+
+    services.forEach(function (service) {
+      if (!isValidServiceShape(service)) {
+        isValid = false;
+        return;
+      }
+
+      if (map[service.id]) {
+        isValid = false;
+        return;
+      }
+
+      hasEntries = true;
+      map[service.id] = {
+        id: String(service.id),
+        name: service.name.trim(),
+        duration: Number(service.duration),
+        requiresGroom: service.requiresGroom,
+        legacyServiceType: normalizeServiceType(service.legacyServiceType)
+      };
+    });
+
+    return {
+      isValid: isValid && hasEntries,
+      map: isValid && hasEntries ? map : {}
+    };
+  }
+
+  function getStoredServiceCatalog() {
+    var services = read("services");
+    var meta = buildServiceByIdMap(services);
+
+    if (!meta.isValid) {
+      return {
+        services: deepClone(SERVICES),
+        serviceById: buildServiceByIdMap(SERVICES).map,
+        needsRewrite: true
+      };
+    }
+
+    return {
+      services: Object.keys(meta.map).map(function (id) {
+        return deepClone(meta.map[id]);
+      }),
+      serviceById: meta.map,
+      needsRewrite: false
+    };
+  }
+
+  function getServiceByIdFromMap(serviceById, serviceId) {
+    var normalizedId = normalizeServiceId(serviceId);
+    var service = normalizedId && serviceById ? serviceById[normalizedId] : null;
+    return service ? deepClone(service) : null;
+  }
+
+  function findDefaultServiceForLegacyShape(serviceType, duration, serviceById) {
+    var normalizedType = normalizeServiceType(serviceType);
+    var normalizedDuration = Number(duration);
+    var defaultsByType = normalizedType ? LEGACY_SERVICE_DEFAULTS[normalizedType] : null;
+    var serviceId = defaultsByType ? defaultsByType[normalizedDuration] : null;
+
+    if (!serviceId) {
+      return null;
+    }
+
+    return getServiceByIdFromMap(serviceById, serviceId);
+  }
+
+  function applyServiceSnapshot(booking, service) {
+    var nextBooking = Object.assign({}, booking);
+
+    if (!service) {
+      nextBooking.serviceId = null;
+      nextBooking.serviceName = null;
+      nextBooking.serviceDuration = null;
+      nextBooking.serviceRequiresGroom = false;
+      return nextBooking;
+    }
+
+    nextBooking.serviceId = String(service.id);
+    nextBooking.serviceName = service.name;
+    nextBooking.serviceDuration = Number(service.duration);
+    nextBooking.serviceRequiresGroom = Boolean(service.requiresGroom);
+    nextBooking.duration = Number(service.duration);
+    nextBooking.serviceType = normalizeServiceType(service.legacyServiceType) || nextBooking.serviceType || null;
+    return nextBooking;
+  }
+
+  function migrateLegacyBooking(rawBooking, serviceById) {
+    var service = findDefaultServiceForLegacyShape(rawBooking && rawBooking.serviceType, rawBooking && rawBooking.duration, serviceById);
+
+    if (!service) {
+      return Object.assign({}, rawBooking);
+    }
+
+    return applyServiceSnapshot(rawBooking, service);
+  }
+
+  function normalizeBooking(booking, serviceById) {
     var bitrixDealUrl = typeof booking.bitrixDealUrl === "string" ? booking.bitrixDealUrl.trim() : "";
     var bitrixDealLabel = typeof booking.bitrixDealLabel === "string" ? booking.bitrixDealLabel.trim() : "";
     var paymentType = booking.paymentType === "single" || booking.paymentType === "subscription"
@@ -456,14 +624,29 @@ window.KSK = window.KSK || {};
     var hasSubscriptionRemaining = booking.subscriptionRemaining !== null
       && booking.subscriptionRemaining !== undefined
       && booking.subscriptionRemaining !== "";
-
-    return {
+    var effectiveServiceById = serviceById || getStoredServiceCatalog().serviceById;
+    var normalizedDuration = Number(booking.duration);
+    var normalizedServiceId = normalizeServiceId(booking.serviceId);
+    var normalizedServiceTypeValue = normalizeServiceType(booking.serviceType);
+    var normalizedServiceDuration = Number(booking.serviceDuration);
+    var normalizedServiceName = typeof booking.serviceName === "string" ? booking.serviceName.trim() : "";
+    var hasValidSnapshot = Boolean(
+      normalizedServiceId
+      && normalizedServiceName
+      && isValidServiceDuration(normalizedServiceDuration)
+      && typeof booking.serviceRequiresGroom === "boolean"
+    );
+    var normalizedBooking = {
       id: booking.id,
       date: booking.date,
       time: booking.time,
-      duration: Number(booking.duration),
+      duration: normalizedDuration,
       clientName: booking.clientName,
-      serviceType: booking.serviceType,
+      serviceId: normalizedServiceId || null,
+      serviceName: hasValidSnapshot ? normalizedServiceName : null,
+      serviceDuration: hasValidSnapshot ? normalizedServiceDuration : null,
+      serviceRequiresGroom: hasValidSnapshot ? Boolean(booking.serviceRequiresGroom) : false,
+      serviceType: normalizedServiceTypeValue,
       trainerId: booking.trainerId,
       horseId: booking.horseId || null,
       groomId: booking.groomId || null,
@@ -484,6 +667,43 @@ window.KSK = window.KSK || {};
         ? subscriptionRemainingValue
         : null
     };
+    var service = null;
+
+    if (normalizedBooking.serviceId) {
+      service = getServiceByIdFromMap(effectiveServiceById, normalizedBooking.serviceId);
+
+      if (!service && normalizedBooking.serviceType) {
+        service = findDefaultServiceForLegacyShape(normalizedBooking.serviceType, normalizedBooking.duration, effectiveServiceById);
+      }
+
+      if (service) {
+        normalizedBooking = applyServiceSnapshot(normalizedBooking, service);
+      } else if (hasValidSnapshot) {
+        normalizedBooking.duration = normalizedBooking.serviceDuration;
+      } else {
+        normalizedBooking = applyServiceSnapshot(normalizedBooking, null);
+      }
+    } else {
+      normalizedBooking = migrateLegacyBooking(normalizedBooking, effectiveServiceById);
+    }
+
+    if (normalizedBooking.serviceId) {
+      if (!normalizedBooking.serviceType) {
+        service = service || getServiceByIdFromMap(effectiveServiceById, normalizedBooking.serviceId);
+        normalizedBooking.serviceType = service ? normalizeServiceType(service.legacyServiceType) : normalizedBooking.serviceType;
+      }
+      if (isValidServiceDuration(Number(normalizedBooking.serviceDuration))) {
+        normalizedBooking.duration = Number(normalizedBooking.serviceDuration);
+      }
+    }
+
+    if (!normalizedBooking.serviceId) {
+      normalizedBooking.serviceName = null;
+      normalizedBooking.serviceDuration = null;
+      normalizedBooking.serviceRequiresGroom = false;
+    }
+
+    return normalizedBooking;
   }
 
   KSK.Utils = {
@@ -529,10 +749,42 @@ window.KSK = window.KSK || {};
 
   KSK.Data = {
     init: function () {
+      var serviceCatalog;
+      var serviceById;
+      var rawBookings;
+      var healedBookings;
+      var hasBookingChanges = false;
+
       if (!window.localStorage.getItem(getStorageKey("bookings"))) {
         this.seedData();
         return;
       }
+
+      serviceCatalog = getStoredServiceCatalog();
+      serviceById = serviceCatalog.serviceById;
+
+      if (serviceCatalog.needsRewrite) {
+        write("services", deepClone(serviceCatalog.services));
+      }
+
+      rawBookings = read("bookings");
+      if (Array.isArray(rawBookings)) {
+        healedBookings = rawBookings.map(function (booking) {
+          var normalized = normalizeBooking(booking, serviceById);
+
+          if (!hasBookingChanges && JSON.stringify(normalized) !== JSON.stringify(booking)) {
+            hasBookingChanges = true;
+          }
+
+          return normalized;
+        });
+
+        if (hasBookingChanges) {
+          healedBookings.sort(compareBookings);
+          write("bookings", healedBookings);
+        }
+      }
+
       if (!window.localStorage.getItem(getStorageKey("trainerSchedules"))) {
         write("trainerSchedules", deepClone(TRAINER_SCHEDULES));
       }
@@ -558,8 +810,23 @@ window.KSK = window.KSK || {};
       return read("arenas");
     },
 
+    getServices: function () {
+      return deepClone(getStoredServiceCatalog().services);
+    },
+
+    getServiceById: function (serviceId) {
+      return getServiceByIdFromMap(getStoredServiceCatalog().serviceById, serviceId);
+    },
+
+    getDefaultServiceForLegacyShape: function (serviceType, duration) {
+      return findDefaultServiceForLegacyShape(serviceType, duration, getStoredServiceCatalog().serviceById);
+    },
+
     getBookings: function (date) {
-      var bookings = read("bookings").map(normalizeBooking).sort(compareBookings);
+      var serviceById = getStoredServiceCatalog().serviceById;
+      var bookings = read("bookings").map(function (booking) {
+        return normalizeBooking(booking, serviceById);
+      }).sort(compareBookings);
       if (!date) {
         return bookings;
       }
@@ -569,11 +836,12 @@ window.KSK = window.KSK || {};
     },
 
     getBookingById: function (id) {
+      var serviceById = getStoredServiceCatalog().serviceById;
       var bookings = read("bookings");
       var match = bookings.find(function (booking) {
         return booking.id === id;
       });
-      return match ? normalizeBooking(match) : null;
+      return match ? normalizeBooking(match, serviceById) : null;
     },
 
     getTrainerShiftForDate: function (trainerId, isoDate) {
@@ -672,8 +940,9 @@ window.KSK = window.KSK || {};
     },
 
     saveBooking: function (booking) {
+      var serviceById = getStoredServiceCatalog().serviceById;
       var bookings = read("bookings");
-      var nextBooking = normalizeBooking(booking);
+      var nextBooking = normalizeBooking(booking, serviceById);
       if (!nextBooking.id) {
         nextBooking.id = this.generateId("b");
       }
@@ -707,6 +976,7 @@ window.KSK = window.KSK || {};
       write("horses", deepClone(HORSES));
       write("grooms", deepClone(GROOMS));
       write("arenas", deepClone(ARENAS));
+      write("services", deepClone(SERVICES));
       write("bookings", deepClone(BOOKINGS));
     },
 

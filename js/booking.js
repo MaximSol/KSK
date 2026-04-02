@@ -16,7 +16,8 @@ window.KSK = window.KSK || {};
   var state = {
     mode: "new",
     bookingId: null,
-    currentStatus: null
+    currentStatus: null,
+    originalBookingSnapshot: null
   };
 
   var elements = {};
@@ -65,12 +66,20 @@ window.KSK = window.KSK || {};
     return null;
   }
 
+  function resolveEffectiveStatus(status) {
+    if (status === "cancelled") {
+      return "confirmed";
+    }
+
+    return status || "draft";
+  }
+
   function getAllFormFields() {
     return [
       getInput("booking-date"),
       getInput("booking-time"),
       getInput("booking-duration"),
-      getInput("booking-service-type"),
+      getInput("booking-service-id"),
       getInput("booking-client-name"),
       getInput("booking-trainer-id"),
       getInput("booking-horse-id"),
@@ -197,11 +206,116 @@ window.KSK = window.KSK || {};
   }
 
   function getHorseAvailabilityPrompt() {
-    return "Доступность лошади появится после выбора даты и лошади";
+    return isServiceCatalogEnabled()
+      ? "Доступность лошади появится после выбора услуги, даты и лошади"
+      : "Доступность лошади появится после выбора даты и лошади";
   }
 
   function isScheduleInsightsEnabled() {
     return KSK.App && typeof KSK.App.isScheduleInsightsEnabled === "function" && KSK.App.isScheduleInsightsEnabled();
+  }
+
+  function isServiceCatalogEnabled() {
+    return !(window.KSK_FLAGS && window.KSK_FLAGS.serviceCatalogMvp === false);
+  }
+
+  function syncServiceFieldCaption() {
+    var label = elements["booking-service-label"];
+
+    if (!label) {
+      return;
+    }
+
+    label.textContent = isServiceCatalogEnabled() ? "Услуга" : "Тип";
+  }
+
+  function getSelectedService(raw) {
+    if (!isServiceCatalogEnabled() || !raw || !raw.serviceId) {
+      return null;
+    }
+
+    return KSK.Data.getServiceById(raw.serviceId);
+  }
+
+  function getEffectiveHorseDuration(raw) {
+    if (!raw) {
+      return null;
+    }
+
+    if (isServiceCatalogEnabled()) {
+      return raw.serviceId ? Number(raw.duration) : null;
+    }
+
+    return raw.duration ? Number(raw.duration) : null;
+  }
+
+  function getDefaultCatalogService() {
+    var services = KSK.Data.getServices();
+
+    return services.find(function (service) {
+      return service.legacyServiceType === "training" && Number(service.duration) === 45;
+    }) || null;
+  }
+
+  function syncGroomPlaceholder(requiresGroom) {
+    var groomSelect = getInput("booking-groom-id");
+    var placeholder = groomSelect && groomSelect.options ? groomSelect.options[0] : null;
+
+    if (!placeholder) {
+      return;
+    }
+
+    placeholder.textContent = requiresGroom ? "Выберите коновода" : "Не назначен";
+  }
+
+  function syncServiceSelection(raw) {
+    var durationSelect = getInput("booking-duration");
+    var service = getSelectedService(raw);
+
+    syncServiceFieldCaption();
+
+    if (!isServiceCatalogEnabled()) {
+      durationSelect.disabled = false;
+      syncGroomPlaceholder(false);
+      return raw;
+    }
+
+    if (!service) {
+      setOptions(durationSelect, [optionHtml("", "Выберите услугу")]);
+      durationSelect.value = "";
+      durationSelect.disabled = true;
+      syncGroomPlaceholder(false);
+      return collectFormData();
+    }
+
+    setOptions(durationSelect, [optionHtml(String(service.duration), String(service.duration) + " минут")]);
+    durationSelect.value = String(service.duration);
+    durationSelect.disabled = true;
+    syncGroomPlaceholder(Boolean(service.requiresGroom));
+    return collectFormData();
+  }
+
+  function copyServiceSnapshot(target, source) {
+    target.serviceId = source && source.serviceId ? String(source.serviceId) : null;
+    target.serviceName = source && source.serviceName ? source.serviceName : null;
+    target.serviceDuration = source && source.serviceDuration ? Number(source.serviceDuration) : null;
+    target.serviceRequiresGroom = Boolean(source && source.serviceRequiresGroom);
+    return target;
+  }
+
+  function hasLegacyPairChanged(raw) {
+    var original = state.originalBookingSnapshot;
+
+    if (!original) {
+      return true;
+    }
+
+    return normalizeServiceTypeValue(original.serviceType) !== normalizeServiceTypeValue(raw.serviceType)
+      || Number(original.duration) !== Number(raw.duration);
+  }
+
+  function normalizeServiceTypeValue(serviceType) {
+    return serviceType === "training" || serviceType === "rental" ? serviceType : null;
   }
 
   function getBookingsForDate(raw) {
@@ -332,6 +446,7 @@ window.KSK = window.KSK || {};
     var selectedValue = select.value;
     var horses = KSK.Data.getHorses();
     var enabled = isScheduleInsightsEnabled();
+    var effectiveDuration = getEffectiveHorseDuration(raw);
     var bookingsForDate = enabled && raw && raw.date ? getBookingsForDate(raw) : null;
     var options = [optionHtml("", "Без лошади")].concat(horses.map(function (horse) {
       var label = horse.name;
@@ -339,8 +454,8 @@ window.KSK = window.KSK || {};
       if (enabled) {
         label = formatHorseOptionLabel(
           horse,
-          raw && raw.date
-            ? KSK.Data.getHorseSelectableHourSlots(horse.id, raw.date, raw.duration, bookingsForDate)
+          raw && raw.date && effectiveDuration
+            ? KSK.Data.getHorseSelectableHourSlots(horse.id, raw.date, effectiveDuration, bookingsForDate)
             : null
         );
       }
@@ -355,11 +470,13 @@ window.KSK = window.KSK || {};
   }
 
   function getHorseSelectableMeta(raw) {
-    if (!isScheduleInsightsEnabled() || !raw || !raw.date || !raw.horseId) {
+    var effectiveDuration = getEffectiveHorseDuration(raw);
+
+    if (!isScheduleInsightsEnabled() || !raw || !raw.date || !raw.horseId || !effectiveDuration) {
       return null;
     }
 
-    return KSK.Data.getHorseSelectableHourSlots(raw.horseId, raw.date, raw.duration, getBookingsForDate(raw));
+    return KSK.Data.getHorseSelectableHourSlots(raw.horseId, raw.date, effectiveDuration, getBookingsForDate(raw));
   }
 
   function renderHorseAvailabilityHint(raw) {
@@ -467,12 +584,14 @@ window.KSK = window.KSK || {};
   }
 
   function collectFormData() {
-    return {
+    var serviceControlValue = getInput("booking-service-id").value;
+    var raw = {
       id: getInput("booking-id").value || null,
       date: getInput("booking-date").value,
       time: getInput("booking-time").value,
       duration: getInput("booking-duration").value,
-      serviceType: getInput("booking-service-type").value,
+      serviceId: "",
+      serviceType: "",
       clientName: getInput("booking-client-name").value,
       trainerId: getInput("booking-trainer-id").value,
       horseId: getInput("booking-horse-id").value,
@@ -486,18 +605,29 @@ window.KSK = window.KSK || {};
       bitrixDealUrl: getInput("booking-bitrix-deal-url").value,
       bitrixDealLabel: getInput("booking-bitrix-deal-label").value
     };
+
+    if (isServiceCatalogEnabled()) {
+      raw.serviceId = serviceControlValue;
+    } else {
+      raw.serviceType = serviceControlValue;
+    }
+
+    return raw;
   }
 
   function normalizeFormData(raw, nextStatus) {
     var bitrixFields = getNormalizedBitrixFields(raw.bitrixDealUrl, raw.bitrixDealLabel);
     var paymentType = normalizePaymentType(raw.paymentType);
-
-    return {
+    var normalized = {
       id: raw.id || undefined,
       date: raw.date,
       time: raw.time,
       duration: Number(raw.duration),
-      serviceType: raw.serviceType,
+      serviceId: null,
+      serviceName: null,
+      serviceDuration: null,
+      serviceRequiresGroom: false,
+      serviceType: normalizeServiceTypeValue(raw.serviceType),
       clientName: trimValue(raw.clientName),
       trainerId: raw.trainerId,
       horseId: raw.horseId || null,
@@ -512,9 +642,43 @@ window.KSK = window.KSK || {};
       bitrixDealUrl: bitrixFields.bitrixDealUrl,
       bitrixDealLabel: bitrixFields.bitrixDealLabel
     };
+    var service = null;
+
+    if (isServiceCatalogEnabled()) {
+      service = raw.serviceId ? KSK.Data.getServiceById(raw.serviceId) : null;
+      if (service) {
+        normalized.serviceId = String(service.id);
+        normalized.serviceName = service.name;
+        normalized.serviceDuration = Number(service.duration);
+        normalized.serviceRequiresGroom = Boolean(service.requiresGroom);
+        normalized.serviceType = normalizeServiceTypeValue(service.legacyServiceType);
+        normalized.duration = Number(service.duration);
+      }
+
+      return normalized;
+    }
+
+    if (!hasLegacyPairChanged(raw) && state.originalBookingSnapshot && state.originalBookingSnapshot.serviceId) {
+      copyServiceSnapshot(normalized, state.originalBookingSnapshot);
+      normalized.duration = state.originalBookingSnapshot.serviceDuration || normalized.duration;
+      normalized.serviceType = normalizeServiceTypeValue(state.originalBookingSnapshot.serviceType) || normalized.serviceType;
+      return normalized;
+    }
+
+    service = KSK.Data.getDefaultServiceForLegacyShape(raw.serviceType, raw.duration);
+    if (service) {
+      normalized.serviceId = String(service.id);
+      normalized.serviceName = service.name;
+      normalized.serviceDuration = Number(service.duration);
+      normalized.serviceRequiresGroom = Boolean(service.requiresGroom);
+      normalized.serviceType = normalizeServiceTypeValue(service.legacyServiceType) || normalized.serviceType;
+      normalized.duration = Number(service.duration);
+    }
+
+    return normalized;
   }
 
-  function getHardValidation(raw) {
+  function getHardValidation(raw, effectiveStatus) {
     var invalidFieldIds = [];
     var generalInvalidFieldIds = [];
     var duration = Number(raw.duration);
@@ -525,6 +689,8 @@ window.KSK = window.KSK || {};
     var singlePrice = trimValue(raw.singlePrice);
     var subscriptionRemaining = trimValue(raw.subscriptionRemaining);
     var trainerScheduleEnabled = KSK.App && typeof KSK.App.isTrainerScheduleEnabled === "function" && KSK.App.isTrainerScheduleEnabled();
+    var service = getSelectedService(raw);
+    var normalized = normalizeFormData(raw, resolveEffectiveStatus(effectiveStatus));
     var availability = {
       isChecked: false,
       isAvailable: true,
@@ -533,13 +699,14 @@ window.KSK = window.KSK || {};
       message: "",
       severity: null
     };
+    var hasGroomError = false;
 
     function markGeneralInvalid(fieldId) {
       invalidFieldIds.push(fieldId);
       generalInvalidFieldIds.push(fieldId);
     }
 
-    ["booking-date", "booking-time", "booking-duration", "booking-service-type", "booking-client-name", "booking-trainer-id", "booking-arena-id"].forEach(function (fieldId) {
+    ["booking-date", "booking-time", "booking-duration", "booking-service-id", "booking-client-name", "booking-trainer-id", "booking-arena-id"].forEach(function (fieldId) {
       var field = getInput(fieldId);
       var value = field.value;
       if (!value || (fieldId === "booking-client-name" && !trimValue(value))) {
@@ -553,6 +720,24 @@ window.KSK = window.KSK || {};
 
     if (raw.duration && duration !== 30 && duration !== 45) {
       markGeneralInvalid("booking-duration");
+    }
+
+    if (isServiceCatalogEnabled()) {
+      if (!raw.serviceId || !service) {
+        markGeneralInvalid("booking-service-id");
+      }
+
+      if (service && duration !== Number(service.duration)) {
+        invalidFieldIds.push("booking-duration", "booking-service-id");
+      }
+
+      if (
+        service
+        && normalized.serviceDuration !== null
+        && Number(normalized.duration) !== Number(normalized.serviceDuration)
+      ) {
+        invalidFieldIds.push("booking-duration", "booking-service-id");
+      }
     }
 
     if (!Number.isNaN(start) && (start < Utils.DAY_START || end > Utils.DAY_END)) {
@@ -605,11 +790,17 @@ window.KSK = window.KSK || {};
       }
     }
 
+    if (normalized.serviceRequiresGroom && !normalized.groomId) {
+      invalidFieldIds.push("booking-groom-id");
+      hasGroomError = true;
+    }
+
     invalidFieldIds = Array.from(new Set(invalidFieldIds));
     return {
       isValid: invalidFieldIds.length === 0,
       invalidFieldIds: invalidFieldIds,
       hasGeneralErrors: Array.from(new Set(generalInvalidFieldIds)).length > 0,
+      hasGroomError: hasGroomError,
       hasBitrixUrlError: !bitrixUrlState.isEmpty && !bitrixUrlState.isValid,
       hasSinglePriceError: invalidFieldIds.indexOf("booking-single-price") !== -1,
       hasSubscriptionRemainingError: invalidFieldIds.indexOf("booking-subscription-remaining") !== -1,
@@ -617,8 +808,9 @@ window.KSK = window.KSK || {};
     };
   }
 
-  function renderValidation(raw) {
-    var validation = getHardValidation(raw);
+  function renderValidation(raw, effectiveStatus) {
+    var resolvedStatus = resolveEffectiveStatus(effectiveStatus);
+    var validation = getHardValidation(raw, resolvedStatus);
     var conflictsContainer = elements["booking-conflicts"];
     var fragment = document.createDocumentFragment();
     clearFieldStates();
@@ -643,12 +835,16 @@ window.KSK = window.KSK || {};
       fragment.appendChild(createAlert("Заполните обязательные поля и проверьте время занятия", "danger"));
     }
 
+    if (validation.hasGroomError) {
+      fragment.appendChild(createAlert("Для выбранной услуги нужно назначить коновода", "danger"));
+    }
+
     if (validation.availability.message) {
       fragment.appendChild(createAlert(validation.availability.message, validation.availability.severity));
     }
 
     if (validation.isValid) {
-      var probe = normalizeFormData(raw, state.currentStatus || "draft");
+      var probe = normalizeFormData(raw, resolvedStatus);
       var conflicts = KSK.Conflicts.checkConflicts(probe, KSK.Data.getBookings());
       conflicts.forEach(function (conflict) {
         var fieldId = fieldToConflictMap[conflict.type];
@@ -672,20 +868,64 @@ window.KSK = window.KSK || {};
     setOptions(getInput("booking-time"), options);
   }
 
-  function populateDurationOptions() {
-    setOptions(getInput("booking-duration"), [
+  function populateDurationOptions(raw) {
+    var durationSelect = getInput("booking-duration");
+    var service = getSelectedService(raw);
+
+    if (isServiceCatalogEnabled()) {
+      if (!service) {
+        setOptions(durationSelect, [optionHtml("", "Выберите услугу")]);
+        durationSelect.disabled = true;
+        return;
+      }
+
+      setOptions(durationSelect, [optionHtml(String(service.duration), String(service.duration) + " минут")]);
+      durationSelect.disabled = true;
+      return;
+    }
+
+    setOptions(durationSelect, [
       optionHtml("", "Выберите длительность"),
       optionHtml("30", "30 минут"),
       optionHtml("45", "45 минут")
     ]);
+    durationSelect.disabled = false;
   }
 
-  function populateServiceOptions() {
-    setOptions(getInput("booking-service-type"), [
+  function populateServiceOptions(raw) {
+    var select = getInput("booking-service-id");
+    var options;
+    var serviceNameCounts = {};
+
+    syncServiceFieldCaption();
+
+    if (isServiceCatalogEnabled()) {
+      KSK.Data.getServices().forEach(function (service) {
+        serviceNameCounts[service.name] = (serviceNameCounts[service.name] || 0) + 1;
+      });
+
+      options = [optionHtml("", "Выберите услугу")].concat(KSK.Data.getServices().map(function (service) {
+        var label = serviceNameCounts[service.name] > 1
+          ? service.name + " · ID " + service.id
+          : service.name;
+        return optionHtml(String(service.id), label);
+      }));
+
+      setOptions(select, options);
+      if (raw && raw.serviceId) {
+        select.value = String(raw.serviceId);
+      }
+      return;
+    }
+
+    setOptions(select, [
       optionHtml("", "Выберите тип"),
       optionHtml("training", "Обучение"),
       optionHtml("rental", "Аренда")
     ]);
+    if (raw && raw.serviceType) {
+      select.value = raw.serviceType;
+    }
   }
 
   function populateLookupOptions() {
@@ -749,10 +989,11 @@ window.KSK = window.KSK || {};
     var confirmButton = elements["booking-confirm-btn"];
     var saveButton = elements["booking-save-btn"];
     var completeButton = elements["booking-complete-btn"];
+    var restoreButton = elements["booking-restore-btn"];
     var cancelButton = elements["booking-cancel-btn"];
     var deleteButton = elements["booking-delete-btn"];
 
-    [saveDraft, confirmButton, saveButton, completeButton, cancelButton, deleteButton].forEach(function (button) {
+    [saveDraft, confirmButton, saveButton, completeButton, cancelButton, restoreButton, deleteButton].forEach(function (button) {
       button.classList.add("d-none");
     });
 
@@ -775,6 +1016,9 @@ window.KSK = window.KSK || {};
     } else if (status === "completed") {
       saveButton.classList.remove("d-none");
       cancelButton.classList.remove("d-none");
+    } else if (status === "cancelled") {
+      restoreButton.classList.remove("d-none");
+      deleteButton.classList.remove("d-none");
     }
   }
 
@@ -826,7 +1070,8 @@ window.KSK = window.KSK || {};
         "booking-date",
         "booking-time",
         "booking-duration",
-        "booking-service-type",
+        "booking-service-label",
+        "booking-service-id",
         "booking-client-name",
         "booking-trainer-id",
         "booking-trainer-availability",
@@ -853,6 +1098,7 @@ window.KSK = window.KSK || {};
         "booking-confirm-btn",
         "booking-save-btn",
         "booking-complete-btn",
+        "booking-restore-btn",
         "booking-cancel-btn",
         "booking-delete-btn"
       ].forEach(function (id) {
@@ -891,27 +1137,45 @@ window.KSK = window.KSK || {};
         var eventName = field.tagName === "INPUT" || field.tagName === "TEXTAREA" ? "input" : "change";
         var handler = function () {
           var raw = collectFormData();
+
           if (field.id === "booking-payment-type") {
             updatePaymentFieldVisibility(raw);
             raw = collectFormData();
           }
+
+          if (field.id === "booking-service-id") {
+            raw = syncServiceSelection(raw);
+            populateHorseOptions(raw);
+            raw = collectFormData();
+          }
+
           if (field.id === "booking-date") {
             populateTrainerOptions(raw);
             populateHorseOptions(raw);
             raw = collectFormData();
           }
+
           if (field.id === "booking-date" || field.id === "booking-trainer-id" || field.id === "booking-time") {
             renderTrainerSlotPicker(raw);
             raw = collectFormData();
           }
-          if (field.id === "booking-duration") {
+
+          if (field.id === "booking-duration" && !isServiceCatalogEnabled()) {
             populateHorseOptions(raw);
             raw = collectFormData();
           }
-          if (field.id === "booking-date" || field.id === "booking-duration" || field.id === "booking-horse-id" || field.id === "booking-time") {
+
+          if (
+            field.id === "booking-date"
+            || field.id === "booking-time"
+            || field.id === "booking-horse-id"
+            || field.id === "booking-service-id"
+            || (!isServiceCatalogEnabled() && field.id === "booking-duration")
+          ) {
             renderHorseSlotPicker(raw);
             raw = collectFormData();
           }
+
           updateBitrixDealLink(raw);
           renderTrainerAvailabilityHint(raw);
           renderHorseAvailabilityHint(raw);
@@ -937,6 +1201,9 @@ window.KSK = window.KSK || {};
       elements["booking-complete-btn"].addEventListener("click", function () {
         KSK.Booking._save("completed");
       });
+      elements["booking-restore-btn"].addEventListener("click", function () {
+        KSK.Booking._save("confirmed");
+      });
       elements["booking-cancel-btn"].addEventListener("click", function () {
         KSK.Booking._save("cancelled");
       });
@@ -948,11 +1215,15 @@ window.KSK = window.KSK || {};
     },
 
     openNew: function (prefill) {
+      var catalogEnabled = isServiceCatalogEnabled();
+      var fallbackService = null;
+      var prefillService = null;
       var draft = {
         date: getPrefillValue(prefill, "date", KSK.App.state.currentDate),
         time: getPrefillValue(prefill, "time", ""),
-        duration: getPrefillValue(prefill, "duration", 45),
-        serviceType: getPrefillValue(prefill, "serviceType", "training"),
+        duration: "",
+        serviceId: "",
+        serviceType: "",
         clientName: "",
         trainerId: "",
         horseId: "",
@@ -968,11 +1239,36 @@ window.KSK = window.KSK || {};
         status: null
       };
 
+      state.originalBookingSnapshot = null;
+
+      if (prefill && prefill.serviceId) {
+        prefillService = KSK.Data.getServiceById(prefill.serviceId);
+      } else if (prefill && prefill.serviceType && prefill.duration) {
+        prefillService = KSK.Data.getDefaultServiceForLegacyShape(prefill.serviceType, prefill.duration);
+      }
+
       if (prefill && prefill.resourceType === "trainers") {
         draft.trainerId = prefill.resourceId || prefill.trainerId || "";
       }
       if (prefill && prefill.resourceType === "horses") {
         draft.horseId = prefill.resourceId || prefill.horseId || "";
+      }
+
+      if (catalogEnabled) {
+        fallbackService = prefillService || getDefaultCatalogService();
+        if (fallbackService) {
+          draft.serviceId = String(fallbackService.id);
+          draft.serviceType = normalizeServiceTypeValue(fallbackService.legacyServiceType) || "";
+          draft.duration = String(fallbackService.duration);
+        }
+      } else {
+        if (prefillService) {
+          draft.serviceType = normalizeServiceTypeValue(prefillService.legacyServiceType) || "training";
+          draft.duration = String(prefillService.duration);
+        } else {
+          draft.serviceType = getPrefillValue(prefill, "serviceType", "training");
+          draft.duration = String(getPrefillValue(prefill, "duration", 45));
+        }
       }
 
       setModalState("new", draft);
@@ -986,6 +1282,7 @@ window.KSK = window.KSK || {};
         this.showToast("Занятие не найдено", "danger");
         return;
       }
+      state.originalBookingSnapshot = Utils.deepClone(booking);
       setModalState("edit", booking);
       this._populateForm(booking);
       showModal();
@@ -993,17 +1290,25 @@ window.KSK = window.KSK || {};
 
     _save: function (status) {
       var raw = collectFormData();
-      var validation = this._validateForm();
+      var nextStatus = status || state.currentStatus || "draft";
+      var previousStatus = state.currentStatus;
+      var validation = this._validateForm(nextStatus);
       if (!validation.isValid) {
         return;
       }
 
-      var booking = normalizeFormData(raw, status || state.currentStatus || "draft");
+      var booking = normalizeFormData(raw, nextStatus);
       var saved = KSK.Data.saveBooking(booking);
       state.bookingId = saved.id;
       state.currentStatus = saved.status;
       hideModal();
-      this.showToast(saved.status === "cancelled" ? "Занятие отменено" : "Занятие сохранено", saved.status === "cancelled" ? "danger" : "success");
+      if (saved.status === "cancelled") {
+        this.showToast("Занятие отменено", "danger");
+      } else if (previousStatus === "cancelled" && saved.status === "confirmed") {
+        this.showToast("Занятие восстановлено", "success");
+      } else {
+        this.showToast("Занятие сохранено", "success");
+      }
       KSK.App.refresh();
     },
 
@@ -1017,21 +1322,23 @@ window.KSK = window.KSK || {};
       KSK.App.refresh();
     },
 
-    _validateForm: function () {
-      return renderValidation(collectFormData());
+    _validateForm: function (effectiveStatus) {
+      return renderValidation(collectFormData(), resolveEffectiveStatus(effectiveStatus || state.currentStatus));
     },
 
     _populateForm: function (booking) {
       populateTimeOptions();
-      populateDurationOptions();
-      populateServiceOptions();
+      populateDurationOptions(booking);
+      populateServiceOptions(booking);
       populateLookupOptions();
 
       getInput("booking-id").value = booking.id || "";
       getInput("booking-date").value = booking.date || "";
       getInput("booking-time").value = booking.time || "";
       getInput("booking-duration").value = booking.duration ? String(booking.duration) : "";
-      getInput("booking-service-type").value = booking.serviceType || "";
+      getInput("booking-service-id").value = isServiceCatalogEnabled()
+        ? (booking.serviceId ? String(booking.serviceId) : "")
+        : (booking.serviceType || "");
       getInput("booking-client-name").value = booking.clientName || "";
       getInput("booking-trainer-id").value = booking.trainerId || "";
       getInput("booking-horse-id").value = booking.horseId || "";
@@ -1044,6 +1351,7 @@ window.KSK = window.KSK || {};
       getInput("booking-subscription-remaining").value = booking.subscriptionRemaining === null || booking.subscriptionRemaining === undefined ? "" : String(booking.subscriptionRemaining);
       getInput("booking-bitrix-deal-url").value = booking.bitrixDealUrl || "";
       getInput("booking-bitrix-deal-label").value = booking.bitrixDealLabel || "";
+      syncServiceSelection(collectFormData());
       populateTrainerOptions(collectFormData());
       populateHorseOptions(collectFormData());
       renderTrainerSlotPicker(collectFormData());

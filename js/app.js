@@ -103,19 +103,27 @@ window.KSK = window.KSK || {};
     return KSK.Data.getBookings(state.currentDate);
   }
 
-  function buildTrainerWeekSummary(weekDates, gridVisibleBookings) {
+  function buildTrainerWeekSummary(weekDates, visibleTrainerIds) {
     var summary = {
       bookingsByDate: {},
       freeMetaByTrainerAndDate: {},
       dayWindowCounts: {},
+      visibleDayWindowCounts: {},
       trainerWindowCounts: {},
-      totalWindows: 0
+      totalWindows: 0,
+      visibleTotalWindows: 0
     };
     var trainers = KSK.Data.getTrainers();
+    var visibleTrainerIdMap = {};
+
+    (visibleTrainerIds || []).forEach(function (trainerId) {
+      visibleTrainerIdMap[trainerId] = true;
+    });
 
     weekDates.forEach(function (date) {
       summary.bookingsByDate[date] = KSK.Data.getBookings(date);
       summary.dayWindowCounts[date] = 0;
+      summary.visibleDayWindowCounts[date] = 0;
     });
 
     trainers.forEach(function (trainer) {
@@ -130,25 +138,37 @@ window.KSK = window.KSK || {};
         summary.dayWindowCounts[date] += windowCount;
         summary.trainerWindowCounts[trainer.id] += windowCount;
         summary.totalWindows += windowCount;
+        if (!visibleTrainerIds || visibleTrainerIdMap[trainer.id]) {
+          summary.visibleDayWindowCounts[date] += windowCount;
+          summary.visibleTotalWindows += windowCount;
+        }
       });
     });
 
     return summary;
   }
 
-  function buildHorseWeekSummary(weekDates) {
+  function buildHorseWeekSummary(weekDates, visibleHorseIds) {
     var summary = {
       bookingsByDate: {},
       freeMetaByHorseAndDate: {},
       dayStartCounts: {},
+      visibleDayStartCounts: {},
       horseStartCounts: {},
-      totalStarts: 0
+      totalStarts: 0,
+      visibleTotalStarts: 0
     };
     var horses = KSK.Data.getHorses();
+    var visibleHorseIdMap = {};
+
+    (visibleHorseIds || []).forEach(function (horseId) {
+      visibleHorseIdMap[horseId] = true;
+    });
 
     weekDates.forEach(function (date) {
       summary.bookingsByDate[date] = KSK.Data.getBookings(date);
       summary.dayStartCounts[date] = 0;
+      summary.visibleDayStartCounts[date] = 0;
     });
 
     horses.forEach(function (horse) {
@@ -163,6 +183,10 @@ window.KSK = window.KSK || {};
         summary.dayStartCounts[date] += startCount;
         summary.horseStartCounts[horse.id] += startCount;
         summary.totalStarts += startCount;
+        if (!visibleHorseIds || visibleHorseIdMap[horse.id]) {
+          summary.visibleDayStartCounts[date] += startCount;
+          summary.visibleTotalStarts += startCount;
+        }
       });
     });
 
@@ -235,17 +259,16 @@ window.KSK = window.KSK || {};
 
   function getSubtitle() {
     var state = KSK.App.state;
-    var bookings = getCurrentPeriodBookings();
-    var subtitleBookings;
+    var currentBookings = KSK.App._currentBookings || getCurrentPeriodBookings();
+    var subtitleBookings = KSK.App._gridVisibleBookings && KSK.App._gridVisibleBookings.length >= 0
+      ? KSK.App._gridVisibleBookings
+      : currentBookings;
 
     if (state.period === "week") {
-      subtitleBookings = isEnhancedResourceWeekState(state)
-        ? KSK.App.getGridVisibleBookings()
-        : bookings;
       return KSK.Calendar.getWeekRangeLabel(state.currentDate) + " • " + subtitleBookings.length + " " + Utils.pluralize(subtitleBookings.length, ["запись", "записи", "записей"]);
     }
 
-    return Utils.VIEW_LABELS[state.viewType] + " • " + bookings.length + " " + Utils.pluralize(bookings.length, ["запись", "записи", "записей"]) + " на " + Utils.formatDateLabel(state.currentDate, {
+    return Utils.VIEW_LABELS[state.viewType] + " • " + subtitleBookings.length + " " + Utils.pluralize(subtitleBookings.length, ["запись", "записи", "записей"]) + " на " + Utils.formatDateLabel(state.currentDate, {
       day: "numeric",
       month: "long",
       year: "numeric"
@@ -370,6 +393,77 @@ window.KSK = window.KSK || {};
     pendingProblemToggleTimerId = null;
   }
 
+  function openNativeDatePicker(datePicker) {
+    if (!datePicker) {
+      return;
+    }
+
+    if (typeof datePicker.showPicker === "function") {
+      try {
+        datePicker.showPicker();
+        return;
+      } catch (error) {
+        // Fallback for browsers that expose showPicker() but reject scripted opening.
+      }
+    }
+
+    datePicker.focus();
+    datePicker.click();
+  }
+
+  function closeNativeDatePicker(datePicker, focusTarget) {
+    if (!datePicker) {
+      return;
+    }
+
+    datePicker.blur();
+    if (!focusTarget || typeof focusTarget.focus !== "function") {
+      return;
+    }
+
+    window.requestAnimationFrame(function () {
+      try {
+        focusTarget.focus({ preventScroll: true });
+      } catch (error) {
+        focusTarget.focus();
+      }
+    });
+  }
+
+  function bindCalendarDatePickerChange(datePicker, currentDateBtn) {
+    if (!datePicker) {
+      return;
+    }
+
+    datePicker.addEventListener("change", function () {
+      var isoDate = datePicker.value;
+      var nextDatePicker = replaceCalendarDatePicker(currentDateBtn);
+
+      closeNativeDatePicker(nextDatePicker || datePicker, currentDateBtn);
+      if (!isoDate || isoDate === KSK.App.state.currentDate) {
+        return;
+      }
+
+      KSK.App.setDate(isoDate, { silent: true });
+      KSK.App.refresh();
+    });
+  }
+
+  function replaceCalendarDatePicker(currentDateBtn) {
+    var datePicker = byId("calendar-date-picker");
+    var replacement;
+
+    if (!datePicker || !datePicker.parentNode) {
+      return null;
+    }
+
+    replacement = datePicker.cloneNode(false);
+    replacement.value = datePicker.value;
+    datePicker.parentNode.replaceChild(replacement, datePicker);
+    bindCalendarDatePickerChange(replacement, currentDateBtn);
+    return replacement;
+  }
+
   KSK.App = {
     state: {
       currentDate: "2026-03-19",
@@ -377,10 +471,23 @@ window.KSK = window.KSK || {};
       period: "day",
       selectedBookingId: null,
       previewBookingId: null,
-      focusFilter: "all"
+      focusFilter: "all",
+      resourceFilterType: null,
+      resourceFilterId: null,
+      sidebarCollapsed: false,
+      sidebarSection: "period",
+      sidebarMiniCalendarMonth: null
     },
+    _currentBookings: [],
+    _resourceFilteredBookings: [],
+    _gridVisibleBookings: [],
+    _focusVisibleBookings: [],
+    _trainerWeekSummary: null,
+    _horseWeekSummary: null,
 
     init: function () {
+      var currentDateBtn = byId("current-date-btn");
+
       KSK.Data.init();
       KSK.Booking.init();
       KSK.Calendar.init();
@@ -397,6 +504,19 @@ window.KSK = window.KSK || {};
       byId("next-date-btn").addEventListener("click", function () {
         KSK.App.navigateDate(1);
       });
+      if (currentDateBtn && byId("calendar-date-picker")) {
+        currentDateBtn.addEventListener("click", function () {
+          var datePicker = byId("calendar-date-picker");
+
+          if (!datePicker) {
+            return;
+          }
+
+          datePicker.value = KSK.App.state.currentDate;
+          openNativeDatePicker(datePicker);
+        });
+        bindCalendarDatePickerChange(byId("calendar-date-picker"), currentDateBtn);
+      }
       byId("resource-view-menu").addEventListener("click", function (event) {
         var target = event.target.closest("[data-view]");
         if (!target) {
@@ -412,6 +532,11 @@ window.KSK = window.KSK || {};
           return;
         }
         KSK.Data.seedData();
+        KSK.App.state.resourceFilterType = null;
+        KSK.App.state.resourceFilterId = null;
+        KSK.App.state.sidebarCollapsed = false;
+        KSK.App.state.sidebarSection = "period";
+        KSK.App.state.sidebarMiniCalendarMonth = KSK.App.getMonthStartIso(KSK.App.state.currentDate);
         KSK.App.state.selectedBookingId = null;
         KSK.App.state.previewBookingId = null;
         pendingScrollBookingId = null;
@@ -421,6 +546,8 @@ window.KSK = window.KSK || {};
       byId("calendar-page").addEventListener("click", function (event) {
         var focusTarget = event.target.closest("[data-focus-filter]");
         var problemTarget = event.target.closest("[data-problem-booking-id]");
+        var sidebarTarget = event.target.closest("[data-sidebar-action]");
+        var clearResourceTarget = event.target.closest('[data-action="clear-resource-filter"]');
         var detailsTarget = event.target.closest("[data-details-action]");
         var selected;
 
@@ -434,7 +561,63 @@ window.KSK = window.KSK || {};
           return;
         }
 
+        if (sidebarTarget && KSK.App.isScheduleInsightsEnabled()) {
+          if (sidebarTarget.dataset.sidebarAction === "toggle-sidebar-collapse") {
+            KSK.App.toggleSidebarCollapse();
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "toggle-section") {
+            var nextSection = sidebarTarget.dataset.sidebarSection || "period";
+            var isClosingSection = KSK.App.state.sidebarSection === nextSection;
+
+            KSK.App.state.sidebarSection = isClosingSection ? null : nextSection;
+            if (
+              isClosingSection
+              && (nextSection === "trainers" || nextSection === "horses")
+              && KSK.App.state.resourceFilterType === nextSection
+            ) {
+              KSK.App.state.resourceFilterType = null;
+              KSK.App.state.resourceFilterId = null;
+            }
+            KSK.App.refresh();
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "select-resource") {
+            KSK.App.setResourceFilter(sidebarTarget.dataset.resourceType, sidebarTarget.dataset.resourceId);
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "clear-resource-filter") {
+            KSK.App.clearResourceFilter();
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "mini-calendar-day" && sidebarTarget.dataset.date) {
+            KSK.App.setDate(sidebarTarget.dataset.date, { silent: true });
+            KSK.App.refresh();
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "mini-calendar-prev-month") {
+            KSK.App.state.sidebarMiniCalendarMonth = KSK.App.shiftMonthIso(KSK.App.state.sidebarMiniCalendarMonth, -1);
+            KSK.App.refresh();
+            return;
+          }
+          if (sidebarTarget.dataset.sidebarAction === "mini-calendar-next-month") {
+            KSK.App.state.sidebarMiniCalendarMonth = KSK.App.shiftMonthIso(KSK.App.state.sidebarMiniCalendarMonth, 1);
+            KSK.App.refresh();
+            return;
+          }
+        }
+
+        if (clearResourceTarget && KSK.App.isScheduleInsightsEnabled()) {
+          KSK.App.clearResourceFilter();
+          return;
+        }
+
         if (!detailsTarget || !KSK.App.isScheduleInsightsEnabled()) {
+          return;
+        }
+
+        if (detailsTarget.dataset.detailsAction === "clear-resource-filter") {
+          KSK.App.clearResourceFilter();
           return;
         }
 
@@ -488,6 +671,7 @@ window.KSK = window.KSK || {};
 
       buildLegend(byId("calendar-legend"));
       bindDesktopDensityRefresh();
+      this.state.sidebarMiniCalendarMonth = this.getMonthStartIso(this.state.currentDate);
       this.refresh();
       window.setInterval(function () {
         KSK.Calendar.highlightCurrentHour();
@@ -500,6 +684,34 @@ window.KSK = window.KSK || {};
 
     isTrainerScheduleEnabled: function () {
       return !(window.KSK_FLAGS && window.KSK_FLAGS.trainerScheduleMvp === false);
+    },
+
+    isServiceCatalogEnabled: function () {
+      return !(window.KSK_FLAGS && window.KSK_FLAGS.serviceCatalogMvp === false);
+    },
+
+    isResourceSidebarFilterEnabled: function () {
+      return !(window.KSK_FLAGS && window.KSK_FLAGS.resourceSidebarFilterV1 === false);
+    },
+
+    getMonthStartIso: function (isoDate) {
+      var date = Utils.toDate(isoDate);
+      date.setDate(1);
+      return Utils.isoFromDate(date);
+    },
+
+    shiftMonthIso: function (monthIso, delta) {
+      var date = Utils.toDate(monthIso || this.state.currentDate);
+      date.setDate(1);
+      date.setMonth(date.getMonth() + delta);
+      return Utils.isoFromDate(date);
+    },
+
+    syncSidebarMiniCalendarMonth: function (force) {
+      var nextMonth = this.getMonthStartIso(this.state.currentDate);
+      if (force || !this.state.sidebarMiniCalendarMonth || this.state.sidebarMiniCalendarMonth !== nextMonth) {
+        this.state.sidebarMiniCalendarMonth = nextMonth;
+      }
     },
 
     matchesFocusFilter: function (booking, bookingsForDate) {
@@ -524,17 +736,91 @@ window.KSK = window.KSK || {};
       return isEnhancedResourceWeekState(this.state);
     },
 
-    getGridVisibleBookings: function () {
-      return getCurrentPeriodBookings().filter(function (booking) {
+    setResourceFilter: function (type, id) {
+      if (!this.isResourceSidebarFilterEnabled()) {
+        return;
+      }
+      if ((type !== "trainers" && type !== "horses") || !id) {
+        return;
+      }
+      if (this.state.resourceFilterType === type && this.state.resourceFilterId === id) {
+        this.clearResourceFilter();
+        return;
+      }
+      this.state.resourceFilterType = type;
+      this.state.resourceFilterId = id;
+      this.state.sidebarSection = type;
+      this.refresh();
+    },
+
+    clearResourceFilter: function () {
+      if (!this.state.resourceFilterType && !this.state.resourceFilterId) {
+        return;
+      }
+      this.state.resourceFilterType = null;
+      this.state.resourceFilterId = null;
+      this.refresh();
+    },
+
+    toggleSidebarCollapse: function () {
+      if (!this.isScheduleInsightsEnabled()) {
+        return;
+      }
+      this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+      this.refresh();
+    },
+
+    getResourceFilteredBookings: function (bookings) {
+      var sourceBookings = Array.isArray(bookings) ? bookings : getCurrentPeriodBookings();
+      var filterType = this.state.resourceFilterType;
+      var filterId = this.state.resourceFilterId;
+
+      if (!this.isScheduleInsightsEnabled() || !this.isResourceSidebarFilterEnabled() || !filterType || !filterId) {
+        return sourceBookings.slice();
+      }
+
+      return sourceBookings.filter(function (booking) {
+        if (filterType === "trainers") {
+          return booking.trainerId === filterId;
+        }
+        if (filterType === "horses") {
+          return booking.horseId === filterId;
+        }
+        return true;
+      });
+    },
+
+    getGridVisibleBookings: function (bookings) {
+      var sourceBookings = Array.isArray(bookings) ? bookings : getCurrentPeriodBookings();
+      return sourceBookings.filter(function (booking) {
         return isBookingVisibleInCurrentGrid(booking);
       });
     },
 
-    getVisibleBookings: function () {
+    getVisibleBookings: function (bookings) {
       var app = this;
-      return this.getGridVisibleBookings().filter(function (booking) {
+      var sourceBookings = Array.isArray(bookings) ? bookings : this.getGridVisibleBookings();
+      return sourceBookings.filter(function (booking) {
         return app.matchesFocusFilter(booking, KSK.Data.getBookings(booking.date));
       });
+    },
+
+    getVisibleResourceIds: function (bookings, resourceType) {
+      var ids = {};
+      (bookings || []).forEach(function (booking) {
+        var id = "";
+        if (resourceType === "trainers") {
+          id = booking.trainerId;
+        } else if (resourceType === "horses") {
+          id = booking.horseId;
+        } else if (resourceType === "arenas") {
+          id = booking.arenaId;
+        }
+        if (id) {
+          ids[id] = true;
+        }
+      });
+      return Object.keys(ids);
     },
 
     getSelectedBooking: function () {
@@ -560,6 +846,7 @@ window.KSK = window.KSK || {};
       } else {
         this.state.selectedBookingId = bookingId;
         this.state.previewBookingId = hadPreview ? bookingId : null;
+        this.state.sidebarSection = "period";
       }
       this.refresh();
     },
@@ -598,6 +885,7 @@ window.KSK = window.KSK || {};
       }
 
       this.state.previewBookingId = bookingId;
+      this.state.sidebarSection = "period";
       pendingScrollBookingId = bookingId;
       this.refresh();
     },
@@ -617,6 +905,7 @@ window.KSK = window.KSK || {};
       clearPendingProblemToggle();
       this.state.selectedBookingId = bookingId;
       this.state.previewBookingId = bookingId;
+      this.state.sidebarSection = "period";
       pendingScrollBookingId = bookingId;
       this.refresh();
     },
@@ -632,6 +921,11 @@ window.KSK = window.KSK || {};
       var nextBooking;
 
       if (!booking || allowedNext.indexOf(nextStatus) === -1) {
+        return false;
+      }
+
+      if (booking.serviceRequiresGroom && !booking.groomId) {
+        KSK.Booking.showToast("Назначьте коновода в карточке занятия", "danger");
         return false;
       }
 
@@ -678,11 +972,13 @@ window.KSK = window.KSK || {};
     navigateDate: function (delta) {
       var step = this.state.period === "week" ? 7 : 1;
       this.state.currentDate = Utils.addDays(this.state.currentDate, delta * step);
+      this.syncSidebarMiniCalendarMonth();
       this.refresh();
     },
 
     setDate: function (isoDate, options) {
       this.state.currentDate = isoDate;
+      this.syncSidebarMiniCalendarMonth();
       if (!options || !options.silent) {
         this.refresh();
       }
@@ -727,7 +1023,7 @@ window.KSK = window.KSK || {};
           },
           {
             label: "Свободных окон",
-            value: String(trainerWeekSummary.totalWindows)
+            value: String(trainerWeekSummary.visibleTotalWindows)
           },
           {
             label: "Конфликтов",
@@ -750,7 +1046,7 @@ window.KSK = window.KSK || {};
           },
           {
             label: "Свободных стартов",
-            value: String(horseWeekSummary.totalStarts)
+            value: String(horseWeekSummary.visibleTotalStarts)
           },
           {
             label: "Конфликтов",
@@ -829,240 +1125,483 @@ window.KSK = window.KSK || {};
       container.replaceChildren(fragment);
     },
 
-    renderDetailsPanel: function (bookings, trainerWeekSummary, horseWeekSummary) {
-      var app = this;
-      var panel = byId("booking-details-panel");
-      var container = byId("booking-details-content");
-      var selected = this.getSelectedBooking();
-      var lookups = getLookups();
-      var fragment;
-      var problems;
-      var summary;
-      var isTrainerWeek = isTrainerWeekState(this.state) && trainerWeekSummary;
-      var isHorseWeek = isHorseWeekState(this.state) && horseWeekSummary;
-      var statusActions = [];
-      var selectedDayBookings;
+    buildSidebarMiniCalendar: function (baseDate, selectedDate, period) {
+      var monthStart = this.state.sidebarMiniCalendarMonth || this.getMonthStartIso(baseDate);
+      var monthDate = Utils.toDate(monthStart);
+      var firstWeekdayOffset = (monthDate.getDay() || 7) - 1;
+      var gridStart = Utils.addDays(monthStart, -firstWeekdayOffset);
+      var selectedWeekMap = {};
+      var todayIso = Utils.isoFromDate(new Date());
+      var days = [];
+      var index;
 
-      if (!this.isScheduleInsightsEnabled()) {
+      if (period === "week") {
+        Utils.getWeekDates(selectedDate).forEach(function (isoDate) {
+          selectedWeekMap[isoDate] = true;
+        });
+      }
+
+      for (index = 0; index < 42; index += 1) {
+        var dayIso = Utils.addDays(gridStart, index);
+        var dayDate = Utils.toDate(dayIso);
+        days.push({
+          isoDate: dayIso,
+          label: String(dayDate.getDate()),
+          inMonth: dayDate.getMonth() === monthDate.getMonth(),
+          isSelected: dayIso === selectedDate,
+          isInWeek: Boolean(selectedWeekMap[dayIso]),
+          isToday: dayIso === todayIso
+        });
+      }
+
+      return {
+        title: monthDate.toLocaleDateString("ru-RU", {
+          month: "long",
+          year: "numeric"
+        }),
+        days: days
+      };
+    },
+
+    renderSidebarMiniCalendar: function (container, meta) {
+      var calendar = el("div", "sidebar-mini-calendar");
+      var header = el("div", "sidebar-mini-calendar__header");
+      var prevButton = document.createElement("button");
+      var nextButton = document.createElement("button");
+      var grid = el("div", "sidebar-mini-calendar__grid");
+
+      prevButton.type = "button";
+      prevButton.className = "sidebar-mini-calendar__nav";
+      prevButton.dataset.sidebarAction = "mini-calendar-prev-month";
+      prevButton.textContent = "‹";
+
+      nextButton.type = "button";
+      nextButton.className = "sidebar-mini-calendar__nav";
+      nextButton.dataset.sidebarAction = "mini-calendar-next-month";
+      nextButton.textContent = "›";
+
+      header.appendChild(prevButton);
+      header.appendChild(el("div", "sidebar-mini-calendar__title", meta.title));
+      header.appendChild(nextButton);
+      calendar.appendChild(header);
+
+      ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].forEach(function (label) {
+        grid.appendChild(el("div", "sidebar-mini-calendar__weekday", label));
+      });
+
+      meta.days.forEach(function (day) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "sidebar-mini-calendar__day";
+        if (!day.inMonth) {
+          button.classList.add("sidebar-mini-calendar__day--outside");
+        }
+        if (day.isSelected) {
+          button.classList.add("sidebar-mini-calendar__day--selected");
+        }
+        if (day.isInWeek) {
+          button.classList.add("sidebar-mini-calendar__day--in-week");
+        }
+        if (day.isToday) {
+          button.classList.add("sidebar-mini-calendar__day--today");
+        }
+        button.dataset.sidebarAction = "mini-calendar-day";
+        button.dataset.date = day.isoDate;
+        button.textContent = day.label;
+        grid.appendChild(button);
+      });
+
+      calendar.appendChild(grid);
+      container.appendChild(calendar);
+    },
+
+    renderSidebarCalendarPanel: function () {
+      var panel = byId("sidebar-calendar-panel");
+      var wrapper;
+      var header;
+      var body;
+      var subtitle = this.state.period === "week"
+        ? KSK.Calendar.getWeekRangeLabel(this.state.currentDate)
+        : Utils.formatDateLabel(this.state.currentDate, {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        });
+
+      if (!panel) {
         return;
       }
 
-      panel.dataset.state = selected ? "selected" : "empty";
-      fragment = document.createDocumentFragment();
+      wrapper = el("section", "schedule-sidebar__calendar");
+      header = el("div", "schedule-sidebar__calendar-header");
+      body = el("div", "schedule-sidebar__calendar-body");
 
-      if (!selected) {
-        var visibleProblemBookings;
-        var groupedProblems = {};
+      header.appendChild(el("div", "schedule-sidebar__calendar-title", "Календарь"));
+      header.appendChild(el("div", "schedule-sidebar__calendar-subtitle", subtitle));
+      wrapper.appendChild(header);
+      this.renderSidebarMiniCalendar(body, this.buildSidebarMiniCalendar(this.state.currentDate, this.state.currentDate, this.state.period));
+      wrapper.appendChild(body);
 
-        summary = el("div", "booking-details__empty");
-        summary.appendChild(el("h2", "booking-details__title", "Детали периода"));
-        summary.appendChild(el("p", "booking-details__hint", this.state.period === "week"
+      panel.replaceChildren(wrapper);
+    },
+
+    renderSidebarSection: function (id, title, subtitle, bodyBuilder) {
+      var section = el("section", "schedule-sidebar__section");
+      var header = document.createElement("button");
+      var titleWrap = el("div", "schedule-sidebar__section-title-wrap");
+      var body = el("div", "schedule-sidebar__section-body");
+
+      section.dataset.open = this.state.sidebarSection === id ? "true" : "false";
+      header.type = "button";
+      header.className = "schedule-sidebar__section-header";
+      header.dataset.sidebarAction = "toggle-section";
+      header.dataset.sidebarSection = id;
+
+      titleWrap.appendChild(el("div", "schedule-sidebar__section-title", title));
+      if (subtitle) {
+        titleWrap.appendChild(el("div", "schedule-sidebar__section-subtitle", subtitle));
+      }
+      header.appendChild(titleWrap);
+      header.appendChild(el("span", "schedule-sidebar__section-icon", "⌄"));
+
+      section.appendChild(header);
+      bodyBuilder(body);
+      section.appendChild(body);
+      return section;
+    },
+
+    buildSidebarResourceItems: function (resourceType, currentBookings) {
+      var resources = resourceType === "trainers" ? KSK.Data.getTrainers() : KSK.Data.getHorses();
+      var countsById = {};
+      var app = this;
+
+      currentBookings.forEach(function (booking) {
+        var resourceId = resourceType === "trainers" ? booking.trainerId : booking.horseId;
+        if (!resourceId) {
+          return;
+        }
+        countsById[resourceId] = (countsById[resourceId] || 0) + 1;
+      });
+
+      return resources.filter(function (resource) {
+        return countsById[resource.id] || app.state.resourceFilterId === resource.id;
+      }).map(function (resource) {
+        var count = countsById[resource.id] || 0;
+        var meta = count + " " + Utils.pluralize(count, ["занятие", "занятия", "занятий"]);
+
+        if (resourceType === "horses") {
+          meta += " • " + Utils.HORSE_STATUS_LABELS[resource.status];
+        } else if (app.state.period === "day" && app.isTrainerScheduleEnabled()) {
+          meta += " • " + KSK.Data.getTrainerShiftForDate(resource.id, app.state.currentDate).label;
+        }
+
+        return {
+          id: resource.id,
+          title: resource.name,
+          meta: meta,
+          count: count
+        };
+      });
+    },
+
+    renderSidebarPeriodPanel: function (ctx) {
+      var app = this;
+      var panel = byId("sidebar-period-panel");
+      var selected = ctx.selectedBooking;
+      var subtitle = selected
+        ? selected.clientName
+        : (this.state.period === "week"
           ? KSK.Calendar.getWeekRangeLabel(this.state.currentDate)
           : Utils.formatDateLabel(this.state.currentDate, {
             day: "numeric",
             month: "long",
             year: "numeric"
-          })));
+          }));
 
-        summary.appendChild(createInfoRow("Всего записей", String(bookings.length)));
-        if (isTrainerWeek) {
-          summary.appendChild(createInfoRow("Свободных окон", String(trainerWeekSummary.totalWindows)));
-        } else if (isHorseWeek) {
-          summary.appendChild(createInfoRow("Свободных стартов", String(horseWeekSummary.totalStarts)));
-        } else {
-          summary.appendChild(createInfoRow("Показывается во фокусе", String(this.getVisibleBookings().length)));
-        }
-
-        visibleProblemBookings = bookings
-          .filter(function (booking) {
-            return isBookingVisibleInCurrentGrid(booking);
-          })
-          .filter(function (booking) {
-            var dayBookings = isTrainerWeek && trainerWeekSummary
-              ? trainerWeekSummary.bookingsByDate[booking.date]
-              : isHorseWeek && horseWeekSummary
-                ? horseWeekSummary.bookingsByDate[booking.date]
-                : KSK.Data.getBookings(booking.date);
-            return getProblemDescriptor(booking, dayBookings).priority < 99;
-          })
-          .sort(compareProblemBookings);
-
-        PROBLEM_GROUP_ORDER.forEach(function (problemId) {
-          groupedProblems[problemId] = [];
-        });
-
-        visibleProblemBookings.forEach(function (booking) {
-          var dayBookings = isTrainerWeek && trainerWeekSummary
-            ? trainerWeekSummary.bookingsByDate[booking.date]
-            : isHorseWeek && horseWeekSummary
-              ? horseWeekSummary.bookingsByDate[booking.date]
-              : KSK.Data.getBookings(booking.date);
-          var descriptor = getProblemDescriptor(booking, dayBookings);
-
-          if (descriptor.id === "none" || !groupedProblems[descriptor.id]) {
-            return;
-          }
-          groupedProblems[descriptor.id].push({
-            booking: booking,
-            descriptor: descriptor
-          });
-        });
-
-        problems = PROBLEM_GROUP_ORDER.some(function (problemId) {
-          return groupedProblems[problemId].length > 0;
-        });
-
-        if (problems) {
-          var listSection = createSection("Проблемные записи");
-
-          PROBLEM_GROUP_ORDER.forEach(function (problemId) {
-            var groupEntries = groupedProblems[problemId];
-            var meta = PROBLEM_GROUP_META[problemId];
-            var group;
-            var header;
-
-            if (!groupEntries.length || !meta) {
-              return;
-            }
-
-            group = el("div", "booking-details__problem-group");
-            header = el("div", "booking-details__problem-group-title");
-            header.appendChild(el("span", "", meta.title));
-            header.appendChild(el("span", "booking-details__problem-group-count", String(groupEntries.length)));
-            group.appendChild(header);
-
-            groupEntries.forEach(function (entry) {
-              var booking = entry.booking;
-              var item = document.createElement("button");
-
-              item.type = "button";
-              item.className = "booking-details__problem-item booking-details__problem-item--" + entry.descriptor.id;
-              if (app.state.previewBookingId === booking.id) {
-                item.classList.add("booking-details__problem-item--active");
-              }
-              item.dataset.problemBookingId = booking.id;
-              item.appendChild(el("div", "booking-details__problem-title", Utils.formatShortDate(booking.date) + " • " + booking.time + " • " + booking.clientName));
-              item.appendChild(el("div", "booking-details__problem-meta", entry.descriptor.label));
-              group.appendChild(item);
-            });
-
-            listSection.appendChild(group);
-          });
-
-          fragment.appendChild(summary);
-          fragment.appendChild(listSection);
-        } else {
-          summary.appendChild(el("p", "booking-details__hint", "Проблемных записей не найдено."));
-          fragment.appendChild(summary);
-        }
-
-        fragment.appendChild(el("p", "booking-details__hint booking-details__hint--footer", "Выберите занятие в сетке, чтобы увидеть подробности и действия."));
-        container.replaceChildren(fragment);
+      if (!panel) {
         return;
       }
 
-      var trainer = selected.trainerId ? lookups.trainersById[selected.trainerId] : null;
-      var horse = selected.horseId ? lookups.horsesById[selected.horseId] : null;
-      var groom = selected.groomId ? lookups.groomsById[selected.groomId] : null;
-      var arena = selected.arenaId ? lookups.arenasById[selected.arenaId] : null;
-      selectedDayBookings = isTrainerWeek
-        ? trainerWeekSummary.bookingsByDate[selected.date]
-        : isHorseWeek
-          ? horseWeekSummary.bookingsByDate[selected.date]
-          : KSK.Data.getBookings(selected.date);
-      var conflicts = KSK.Conflicts.checkConflicts(selected, selectedDayBookings);
-      var trainerScheduleEnabled = this.isTrainerScheduleEnabled();
-      var trainerShift = selected.trainerId ? KSK.Data.getTrainerShiftForDate(selected.trainerId, selected.date) : null;
-      var trainerAvailability = selected.trainerId ? KSK.Data.checkTrainerAvailability(selected.trainerId, selected.date, selected.time, selected.duration) : null;
-      var trainerAvailabilityMessage = trainerAvailability && !trainerAvailability.isAvailable
-        ? (trainerAvailability.reason === "off"
-          ? "У тренера выходной в этот день"
-          : "Время занятия выходит за смену тренера")
-        : "";
-      var title = el("div", "booking-details__header");
-      var actions = el("div", "booking-details__actions");
-      var bookingSection = createSection("Занятие");
-      var resourcesSection = createSection("Ресурсы");
-      var financeSection = createSection("Финансы");
-      var conflictsSection = createSection("Конфликты");
+      panel.replaceChildren(this.renderSidebarSection("period", "Детали периода", subtitle, function (body) {
+        var summary = el("div", "booking-details__empty");
+        var actions = el("div", "booking-details__actions");
+        var groupedProblems = {};
+        var lookups = ctx.lookups;
+        var problemBookings;
+        var trainer;
+        var horse;
+        var groom;
+        var arena;
+        var selectedDayBookings;
+        var conflicts;
+        var trainerShift;
+        var trainerAvailability;
+        var trainerAvailabilityMessage;
+        var title;
+        var bookingSection;
+        var resourcesSection;
+        var financeSection;
+        var conflictsSection;
 
-      title.appendChild(el("h2", "booking-details__title", selected.clientName));
-      title.appendChild(el("p", "booking-details__hint", Utils.formatDateLabel(selected.date, {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-      }) + " • " + selected.time + "–" + Utils.addMinutes(selected.time, selected.duration)));
-      fragment.appendChild(title);
+        if (app.state.resourceFilterType && app.isResourceSidebarFilterEnabled()) {
+          actions.appendChild(createActionButton("Сбросить фильтр", "clear-resource-filter", "btn-outline-secondary"));
+          body.appendChild(actions);
+        }
 
-      bookingSection.appendChild(createInfoRow("Дата", Utils.formatDateLabel(selected.date, {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-      })));
-      bookingSection.appendChild(createInfoRow("Время", selected.time + "–" + Utils.addMinutes(selected.time, selected.duration)));
-      bookingSection.appendChild(createInfoRow("Статус", Utils.STATUS_LABELS[selected.status] || selected.status));
-      bookingSection.appendChild(createInfoRow("Тип услуги", Utils.SERVICE_LABELS[selected.serviceType] || selected.serviceType));
-      bookingSection.appendChild(createInfoRow("Клиент", selected.clientName));
-      fragment.appendChild(bookingSection);
+        if (!selected) {
+          summary.appendChild(el("h2", "booking-details__title", "Сводка периода"));
+          summary.appendChild(el("p", "booking-details__hint", subtitle));
+          summary.appendChild(createInfoRow("Видимых записей", String(ctx.bookings.length)));
+          if (isTrainerWeekState(app.state) && ctx.trainerWeekSummary) {
+            summary.appendChild(createInfoRow("Свободных окон", String(ctx.trainerWeekSummary.visibleTotalWindows)));
+          } else if (isHorseWeekState(app.state) && ctx.horseWeekSummary) {
+            summary.appendChild(createInfoRow("Свободных стартов", String(ctx.horseWeekSummary.visibleTotalStarts)));
+          } else {
+            summary.appendChild(createInfoRow("Показывается во фокусе", String(ctx.focusVisibleBookings.length)));
+          }
+          if (app.state.resourceFilterType && app.state.resourceFilterId) {
+            var activeLabel = app.state.resourceFilterType === "trainers"
+              ? (lookups.trainersById[app.state.resourceFilterId] ? lookups.trainersById[app.state.resourceFilterId].name : app.state.resourceFilterId)
+              : (lookups.horsesById[app.state.resourceFilterId] ? lookups.horsesById[app.state.resourceFilterId].name : app.state.resourceFilterId);
+            summary.appendChild(createInfoRow("Активный фильтр", activeLabel));
+          }
+          body.appendChild(summary);
 
-      resourcesSection.appendChild(createInfoRow("Тренер", trainer ? trainer.name : "Не назначен"));
-      if (trainer && trainerScheduleEnabled && trainerShift) {
-        resourcesSection.appendChild(createInfoRow("График тренера", trainerShift.label));
-      }
-      resourcesSection.appendChild(createInfoRow("Лошадь", horse ? horse.name : "Без лошади"));
-      resourcesSection.appendChild(createInfoRow("Коновод", groom ? groom.name : "Не назначен"));
-      resourcesSection.appendChild(createInfoRow("Площадка", arena ? arena.name : "Не назначен"));
-      if (trainer && trainerScheduleEnabled && trainerAvailabilityMessage) {
-        resourcesSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--danger", trainerAvailabilityMessage));
-      }
-      fragment.appendChild(resourcesSection);
+          problemBookings = ctx.bookings.filter(function (booking) {
+            return getProblemDescriptor(booking, KSK.Data.getBookings(booking.date)).priority < 99;
+          }).sort(compareProblemBookings);
 
-      financeSection.appendChild(createInfoRow("Тип оплаты", getPaymentTypeLabel(selected.paymentType)));
-      financeSection.appendChild(createInfoRow("Статус оплаты", getPaymentStatusLabel(selected.paymentStatus)));
-      if (selected.paymentType === "single") {
-        financeSection.appendChild(createInfoRow("Стоимость", formatMoney(selected.singlePrice)));
-      }
-      if (selected.paymentType === "subscription") {
-        financeSection.appendChild(createInfoRow("Осталось занятий", selected.subscriptionRemaining === null ? "Не задано" : String(selected.subscriptionRemaining)));
-      }
-      financeSection.appendChild(createInfoRow("Bitrix24", selected.bitrixDealUrl || "Нет ссылки"));
-      fragment.appendChild(financeSection);
+          PROBLEM_GROUP_ORDER.forEach(function (problemId) {
+            groupedProblems[problemId] = [];
+          });
 
-      if (conflicts.length) {
-        conflicts.forEach(function (conflict) {
-          conflictsSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--" + conflict.severity, conflict.message));
-        });
-      } else {
-        conflictsSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--neutral", "Конфликтов не найдено"));
-      }
-      fragment.appendChild(conflictsSection);
+          problemBookings.forEach(function (booking) {
+            var descriptor = getProblemDescriptor(booking, KSK.Data.getBookings(booking.date));
+            if (descriptor.id !== "none" && groupedProblems[descriptor.id]) {
+              groupedProblems[descriptor.id].push({
+                booking: booking,
+                descriptor: descriptor
+              });
+            }
+          });
 
-      if (isTrainerWeek) {
+          if (problemBookings.length) {
+            var listSection = createSection("Проблемные записи");
+            PROBLEM_GROUP_ORDER.forEach(function (problemId) {
+              var groupEntries = groupedProblems[problemId];
+              var meta = PROBLEM_GROUP_META[problemId];
+              var group;
+              var header;
+
+              if (!groupEntries.length || !meta) {
+                return;
+              }
+
+              group = el("div", "booking-details__problem-group");
+              header = el("div", "booking-details__problem-group-title");
+              header.appendChild(el("span", "", meta.title));
+              header.appendChild(el("span", "booking-details__problem-group-count", String(groupEntries.length)));
+              group.appendChild(header);
+
+              groupEntries.forEach(function (entry) {
+                var item = document.createElement("button");
+                item.type = "button";
+                item.className = "booking-details__problem-item booking-details__problem-item--" + entry.descriptor.id;
+                if (app.state.previewBookingId === entry.booking.id) {
+                  item.classList.add("booking-details__problem-item--active");
+                }
+                item.dataset.problemBookingId = entry.booking.id;
+                item.appendChild(el("div", "booking-details__problem-title", Utils.formatShortDate(entry.booking.date) + " • " + entry.booking.time + " • " + entry.booking.clientName));
+                item.appendChild(el("div", "booking-details__problem-meta", entry.descriptor.label));
+                group.appendChild(item);
+              });
+
+              listSection.appendChild(group);
+            });
+            body.appendChild(listSection);
+          } else {
+            body.appendChild(el("p", "booking-details__hint", "Проблемных записей не найдено."));
+          }
+
+          body.appendChild(el("p", "booking-details__hint booking-details__hint--footer", "Выберите занятие в сетке, чтобы увидеть подробности и действия."));
+          return;
+        }
+
+        trainer = selected.trainerId ? lookups.trainersById[selected.trainerId] : null;
+        horse = selected.horseId ? lookups.horsesById[selected.horseId] : null;
+        groom = selected.groomId ? lookups.groomsById[selected.groomId] : null;
+        arena = selected.arenaId ? lookups.arenasById[selected.arenaId] : null;
+        selectedDayBookings = KSK.Data.getBookings(selected.date);
+        conflicts = KSK.Conflicts.checkConflicts(selected, selectedDayBookings);
+        trainerShift = selected.trainerId ? KSK.Data.getTrainerShiftForDate(selected.trainerId, selected.date) : null;
+        trainerAvailability = selected.trainerId ? KSK.Data.checkTrainerAvailability(selected.trainerId, selected.date, selected.time, selected.duration) : null;
+        trainerAvailabilityMessage = trainerAvailability && !trainerAvailability.isAvailable
+          ? (trainerAvailability.reason === "off" ? "У тренера выходной в этот день" : "Время занятия выходит за смену тренера")
+          : "";
+        title = el("div", "booking-details__header");
+        bookingSection = createSection("Занятие");
+        resourcesSection = createSection("Ресурсы");
+        financeSection = createSection("Финансы");
+        conflictsSection = createSection("Конфликты");
+
+        title.appendChild(el("h2", "booking-details__title", selected.clientName));
+        title.appendChild(el("p", "booking-details__hint", Utils.formatDateLabel(selected.date, {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        }) + " • " + selected.time + "–" + Utils.addMinutes(selected.time, selected.duration)));
+        body.appendChild(title);
+
+        bookingSection.appendChild(createInfoRow("Дата", Utils.formatDateLabel(selected.date, {
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        })));
+        bookingSection.appendChild(createInfoRow("Время", selected.time + "–" + Utils.addMinutes(selected.time, selected.duration)));
+        bookingSection.appendChild(createInfoRow("Статус", Utils.STATUS_LABELS[selected.status] || selected.status));
+        bookingSection.appendChild(createInfoRow(
+          app.isServiceCatalogEnabled() ? "Услуга" : "Тип услуги",
+          selected.serviceName || Utils.SERVICE_LABELS[selected.serviceType] || selected.serviceType || "Не задано"
+        ));
+        bookingSection.appendChild(createInfoRow("Клиент", selected.clientName));
+        body.appendChild(bookingSection);
+
+        resourcesSection.appendChild(createInfoRow("Тренер", trainer ? trainer.name : "Не назначен"));
+        if (trainer && app.isTrainerScheduleEnabled() && trainerShift) {
+          resourcesSection.appendChild(createInfoRow("График тренера", trainerShift.label));
+        }
+        resourcesSection.appendChild(createInfoRow("Лошадь", horse ? horse.name : "Без лошади"));
+        resourcesSection.appendChild(createInfoRow("Коновод", groom ? groom.name : "Не назначен"));
+        resourcesSection.appendChild(createInfoRow("Площадка", arena ? arena.name : "Не назначен"));
+        if (trainer && app.isTrainerScheduleEnabled() && trainerAvailabilityMessage) {
+          resourcesSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--danger", trainerAvailabilityMessage));
+        }
+        body.appendChild(resourcesSection);
+
+        financeSection.appendChild(createInfoRow("Тип оплаты", getPaymentTypeLabel(selected.paymentType)));
+        financeSection.appendChild(createInfoRow("Статус оплаты", getPaymentStatusLabel(selected.paymentStatus)));
+        if (selected.paymentType === "single") {
+          financeSection.appendChild(createInfoRow("Стоимость", formatMoney(selected.singlePrice)));
+        }
+        if (selected.paymentType === "subscription") {
+          financeSection.appendChild(createInfoRow("Осталось занятий", selected.subscriptionRemaining === null ? "Не задано" : String(selected.subscriptionRemaining)));
+        }
+        financeSection.appendChild(createInfoRow("Bitrix24", selected.bitrixDealUrl || "Нет ссылки"));
+        body.appendChild(financeSection);
+
+        if (conflicts.length) {
+          conflicts.forEach(function (conflict) {
+            conflictsSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--" + conflict.severity, conflict.message));
+          });
+        } else {
+          conflictsSection.appendChild(el("div", "booking-details__conflict booking-details__conflict--neutral", "Конфликтов не найдено"));
+        }
+        body.appendChild(conflictsSection);
+
         if (selected.status === "draft") {
-          statusActions.push(createActionButton("Подтвердить", "update-booking-status", "btn-success", "confirmed"));
+          actions.appendChild(createActionButton("Подтвердить", "update-booking-status", "btn-success", "confirmed"));
         }
         if (selected.status === "confirmed") {
-          statusActions.push(createActionButton("Проведено", "update-booking-status", "btn-success", "completed"));
+          actions.appendChild(createActionButton("Проведено", "update-booking-status", "btn-success", "completed"));
         }
         if (selected.status === "draft" || selected.status === "confirmed" || selected.status === "completed") {
-          statusActions.push(createActionButton("Отменить занятие", "update-booking-status", "btn-outline-danger", "cancelled"));
+          actions.appendChild(createActionButton("Отменить занятие", "update-booking-status", "btn-outline-danger", "cancelled"));
         }
+        actions.appendChild(createActionButton("Редактировать", "edit-booking", "btn-primary"));
+        if (app.state.period === "week") {
+          actions.appendChild(createActionButton("Перейти к дню", "go-to-day"));
+        }
+        if (selected.bitrixDealUrl) {
+          actions.appendChild(createActionButton("Открыть Bitrix24", "open-deal"));
+        }
+        actions.appendChild(createActionButton("Скрыть детали", "clear-selection"));
+        body.appendChild(actions);
+      }));
+    },
+
+    renderSidebarResourcePanel: function (resourceType, ctx) {
+      var app = this;
+      var panelId = resourceType === "trainers" ? "sidebar-trainers-panel" : "sidebar-horses-panel";
+      var panel = byId(panelId);
+      var title = resourceType === "trainers" ? "Тренеры" : "Лошади";
+      var items = this.buildSidebarResourceItems(resourceType, ctx.currentBookings);
+      var subtitle = this.state.resourceFilterType === resourceType && this.state.resourceFilterId
+        ? "Активен фильтр"
+        : items.length + " " + Utils.pluralize(items.length, ["ресурс", "ресурса", "ресурсов"]);
+
+      if (!panel) {
+        return;
       }
 
-      statusActions.forEach(function (button) {
-        actions.appendChild(button);
-      });
-      actions.appendChild(createActionButton("Редактировать", "edit-booking", "btn-primary"));
-      if (this.state.period === "week") {
-        actions.appendChild(createActionButton("Перейти к дню", "go-to-day"));
-      }
-      if (selected.bitrixDealUrl) {
-        actions.appendChild(createActionButton("Открыть Bitrix24", "open-deal"));
-      }
-      actions.appendChild(createActionButton("Скрыть детали", "clear-selection"));
-      fragment.appendChild(actions);
+      panel.replaceChildren(this.renderSidebarSection(resourceType, title, subtitle, function (body) {
+        if (!app.isResourceSidebarFilterEnabled()) {
+          body.appendChild(el("div", "schedule-sidebar__empty", "Фильтрация отключена флагом resourceSidebarFilterV1."));
+          return;
+        }
 
-      container.replaceChildren(fragment);
+        body.appendChild(el("p", "schedule-sidebar__section-intro", "Выберите ресурс, чтобы оставить в календаре только связанные с ним занятия."));
+
+        if (!items.length) {
+          body.appendChild(el("div", "schedule-sidebar__empty", "В текущем периоде нет доступных записей для этого списка."));
+        } else {
+          var list = el("div", "sidebar-filter-list");
+          items.forEach(function (item) {
+            var button = document.createElement("button");
+            var main = el("div", "sidebar-filter-item__main");
+            button.type = "button";
+            button.className = "sidebar-filter-item";
+            if (app.state.resourceFilterType === resourceType && app.state.resourceFilterId === item.id) {
+              button.classList.add("sidebar-filter-item--active");
+            }
+            button.dataset.sidebarAction = "select-resource";
+            button.dataset.resourceType = resourceType;
+            button.dataset.resourceId = item.id;
+            main.appendChild(el("div", "sidebar-filter-item__title", item.title));
+            main.appendChild(el("div", "sidebar-filter-item__meta", item.meta));
+            button.appendChild(main);
+            button.appendChild(el("span", "sidebar-filter-item__count", String(item.count)));
+            list.appendChild(button);
+          });
+          body.appendChild(list);
+        }
+
+        if (app.state.resourceFilterType) {
+          var clearActions = el("div", "booking-details__actions");
+          clearActions.appendChild(createActionButton("Сбросить фильтр", "clear-resource-filter", "btn-outline-secondary"));
+          body.appendChild(clearActions);
+        }
+      }));
+    },
+
+    renderSidebarTrainerPanel: function (ctx) {
+      this.renderSidebarResourcePanel("trainers", ctx);
+    },
+
+    renderSidebarHorsePanel: function (ctx) {
+      this.renderSidebarResourcePanel("horses", ctx);
+    },
+
+    renderSidebar: function (bookings, trainerWeekSummary, horseWeekSummary) {
+      var ctx;
+
+      if (!this.isScheduleInsightsEnabled()) {
+        return;
+      }
+
+      ctx = {
+        bookings: bookings,
+        currentBookings: this._currentBookings || [],
+        focusVisibleBookings: this._focusVisibleBookings || [],
+        selectedBooking: this.getSelectedBooking(),
+        trainerWeekSummary: trainerWeekSummary,
+        horseWeekSummary: horseWeekSummary,
+        lookups: getLookups()
+      };
+
+      this.renderSidebarCalendarPanel();
+      this.renderSidebarPeriodPanel(ctx);
+      this.renderSidebarTrainerPanel(ctx);
+      this.renderSidebarHorsePanel(ctx);
     },
 
     refresh: function () {
@@ -1071,19 +1610,31 @@ window.KSK = window.KSK || {};
       var prevScrollLeft = scroll ? scroll.scrollLeft : 0;
       var enabled = this.isScheduleInsightsEnabled();
       var currentBookings = getCurrentPeriodBookings();
-      var gridVisibleBookings = this.getGridVisibleBookings();
-      var focusVisibleBookings = enabled ? this.getVisibleBookings() : gridVisibleBookings;
+      var resourceFilteredBookings = this.getResourceFilteredBookings(currentBookings);
+      var gridVisibleBookings = this.getGridVisibleBookings(resourceFilteredBookings);
+      var focusVisibleBookings = enabled ? this.getVisibleBookings(gridVisibleBookings) : gridVisibleBookings;
       var weekDates = this.state.period === "week" ? Utils.getWeekDates(this.state.currentDate) : [];
+      var visibleTrainerIds = this.getVisibleResourceIds(gridVisibleBookings, "trainers");
+      var visibleHorseIds = this.getVisibleResourceIds(gridVisibleBookings, "horses");
       var trainerWeekSummary = enabled && isTrainerWeekState(this.state)
-        ? buildTrainerWeekSummary(weekDates, gridVisibleBookings)
+        ? buildTrainerWeekSummary(weekDates, visibleTrainerIds)
         : null;
       var horseWeekSummary = enabled && isHorseWeekState(this.state)
-        ? buildHorseWeekSummary(weekDates)
+        ? buildHorseWeekSummary(weekDates, visibleHorseIds)
         : null;
-      var summaryBookings = enabled && this.state.period === "week" && this.state.viewType !== "arenas"
-        ? gridVisibleBookings
-        : currentBookings;
       var page = byId("calendar-page");
+      var currentDateBtn = byId("current-date-btn");
+      var datePicker = byId("calendar-date-picker");
+      var toolbar = byId("calendar-toolbar");
+      var sidebar = byId("schedule-sidebar");
+      var sidebarContent = byId("schedule-sidebar-content");
+      var sidebarToggle = byId("schedule-sidebar-toggle");
+      var sidebarToggleLabel = sidebarToggle ? sidebarToggle.querySelector(".schedule-sidebar__toggle-label") : null;
+      var sidebarToggleIcon = sidebarToggle ? sidebarToggle.querySelector(".schedule-sidebar__toggle-icon") : null;
+      var isDatePickerDisabled = !(currentDateBtn && datePicker);
+      var overviewHidden = !enabled || (page ? page.classList.contains("calendar-overview-hidden") : true);
+      var sidebarCollapsed = enabled && this.state.sidebarCollapsed;
+      var sidebarToggleText = sidebarCollapsed ? "Развернуть панель" : "Свернуть панель";
 
       if (!enabled) {
         clearPendingProblemToggle();
@@ -1092,6 +1643,17 @@ window.KSK = window.KSK || {};
         this.state.focusFilter = "all";
         pendingScrollBookingId = null;
       }
+
+      this._currentBookings = currentBookings;
+      this._resourceFilteredBookings = resourceFilteredBookings;
+      this._gridVisibleBookings = gridVisibleBookings;
+      this._focusVisibleBookings = focusVisibleBookings;
+      this._trainerWeekSummary = trainerWeekSummary;
+      this._horseWeekSummary = horseWeekSummary;
+      page.dataset.period = this.state.period;
+      page.dataset.viewType = this.state.viewType;
+      page.classList.toggle("schedule-insights-enabled", enabled);
+      page.classList.toggle("schedule-insights-disabled", !enabled);
 
       this.syncSelectionWithVisibility(gridVisibleBookings, focusVisibleBookings);
 
@@ -1104,14 +1666,41 @@ window.KSK = window.KSK || {};
           horseWeekSummary: horseWeekSummary
         });
       } else {
-        KSK.Calendar.renderDayView(this.state.currentDate, this.state.viewType);
+        KSK.Calendar.renderDayView(this.state.currentDate, this.state.viewType, {
+          bookings: gridVisibleBookings,
+          allDayBookings: currentBookings,
+          allowEmptyResetAction: Boolean(this.state.resourceFilterType)
+        });
       }
 
-      page.classList.toggle("schedule-insights-enabled", enabled);
-      page.classList.toggle("schedule-insights-disabled", !enabled);
-      byId("calendar-overview").hidden = !enabled;
+      page.classList.toggle("schedule-sidebar-collapsed", sidebarCollapsed);
+      byId("calendar-overview").hidden = overviewHidden;
+      if (toolbar) {
+        toolbar.hidden = !enabled;
+      }
       byId("calendar-focus-controls").hidden = !enabled;
-      byId("booking-details-panel").hidden = !enabled;
+      if (sidebar) {
+        sidebar.hidden = !enabled;
+      }
+      if (sidebarToggle) {
+        sidebarToggle.setAttribute("aria-expanded", sidebarCollapsed ? "false" : "true");
+        sidebarToggle.setAttribute("title", sidebarToggleText);
+      }
+      if (sidebarToggleLabel) {
+        sidebarToggleLabel.textContent = sidebarToggleText;
+      }
+      if (sidebarToggleIcon) {
+        sidebarToggleIcon.textContent = sidebarCollapsed ? "›" : "‹";
+      }
+      if (sidebarContent) {
+        sidebarContent.setAttribute("aria-hidden", sidebarCollapsed ? "true" : "false");
+        sidebarContent.inert = sidebarCollapsed;
+        if (sidebarCollapsed) {
+          sidebarContent.setAttribute("inert", "");
+        } else {
+          sidebarContent.removeAttribute("inert");
+        }
+      }
 
       byId("calendar-title").textContent = getTitle();
       byId("calendar-subtitle").textContent = getSubtitle();
@@ -1121,18 +1710,27 @@ window.KSK = window.KSK || {};
       setActive(byId("period-week-btn"), this.state.period === "week");
       byId("period-week-btn").disabled = this.state.viewType === "arenas";
 
-      byId("current-date-btn").textContent = this.state.period === "week"
-        ? KSK.Calendar.getWeekRangeLabel(this.state.currentDate)
-        : Utils.formatDateLabel(this.state.currentDate, {
-          day: "numeric",
-          month: "long",
-          year: "numeric"
-        });
+      if (currentDateBtn) {
+        currentDateBtn.disabled = isDatePickerDisabled;
+        currentDateBtn.setAttribute("aria-disabled", isDatePickerDisabled ? "true" : "false");
+        currentDateBtn.classList.toggle("disabled", isDatePickerDisabled);
+        currentDateBtn.textContent = this.state.period === "week"
+          ? KSK.Calendar.getWeekRangeLabel(this.state.currentDate)
+          : Utils.formatDateLabel(this.state.currentDate, {
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+          });
+      }
+
+      if (datePicker) {
+        datePicker.value = this.state.currentDate;
+      }
 
       if (enabled) {
-        this.renderOverview(summaryBookings, trainerWeekSummary, horseWeekSummary);
+        this.renderOverview(gridVisibleBookings, trainerWeekSummary, horseWeekSummary);
         this.renderFocusControls();
-        this.renderDetailsPanel(summaryBookings, trainerWeekSummary, horseWeekSummary);
+        this.renderSidebar(gridVisibleBookings, trainerWeekSummary, horseWeekSummary);
       }
 
       var scrollTargetBookingId = pendingScrollBookingId;

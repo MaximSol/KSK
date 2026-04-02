@@ -23,5 +23,9 @@ temp/
 # Local environment and swap files
 .env
 .env.*
+!/bridge/.env.example
+/bridge/.env
+/bridge/bitrix_mapping.local.json
+/bridge/data/
 *.swp
 *.swo

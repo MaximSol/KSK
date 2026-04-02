@@ -23,6 +23,11 @@
       <div class="container-fluid px-3 gap-3 flex-nowrap">
         <div class="navbar-brand mb-0 fw-semibold">КСК Дубрава</div>
 
+        <div id="calendar-header-meta">
+          <h1 id="calendar-title" class="h5 mb-1">Расписание</h1>
+          <div id="calendar-subtitle" class="text-body-secondary small"></div>
+        </div>
+
         <div id="header-controls" class="d-flex align-items-center gap-2 ms-auto flex-nowrap">
           <div id="period-switch" class="btn-group btn-group-sm" role="group" aria-label="Период">
             <button id="period-day-btn" type="button" class="btn btn-outline-secondary active" data-period="day">День</button>
@@ -31,7 +36,14 @@
 
           <div id="date-nav" class="btn-group btn-group-sm" role="group" aria-label="Навигация по датам">
             <button id="prev-date-btn" type="button" class="btn btn-outline-secondary" data-nav="-1">‹</button>
-            <button id="current-date-btn" type="button" class="btn btn-outline-secondary disabled" aria-disabled="true"></button>
+            <button id="current-date-btn" type="button" class="btn btn-outline-secondary"></button>
+            <input
+              id="calendar-date-picker"
+              type="date"
+              class="calendar-date-picker-input"
+              aria-hidden="true"
+              tabindex="-1"
+            >
             <button id="next-date-btn" type="button" class="btn btn-outline-secondary" data-nav="1">›</button>
           </div>
 
@@ -59,31 +71,43 @@
     </nav>
 
     <main class="flex-grow-1 overflow-hidden">
-      <section id="calendar-page" class="container-fluid py-3 h-100 d-flex flex-column gap-3">
+      <section id="calendar-page" class="container-fluid py-3 h-100 d-flex flex-column gap-3 calendar-overview-hidden">
         <div id="calendar-toolbar" class="d-flex justify-content-between align-items-center gap-3">
-          <div>
-            <h1 id="calendar-title" class="h5 mb-1">Расписание</h1>
-            <div id="calendar-subtitle" class="text-body-secondary small"></div>
-          </div>
+          <section
+            id="calendar-focus-controls"
+            class="calendar-insights-shell"
+            aria-label="Фокус по записям"
+          ></section>
           <div id="calendar-legend" class="d-flex align-items-center gap-2 small flex-wrap"></div>
         </div>
 
         <section id="calendar-overview" class="calendar-insights-shell"></section>
 
-        <section
-          id="calendar-focus-controls"
-          class="calendar-insights-shell"
-          aria-label="Фокус по записям"
-        ></section>
-
         <div id="schedule-workspace" class="flex-grow-1">
+          <aside id="schedule-sidebar" class="card shadow-sm">
+            <button
+              id="schedule-sidebar-toggle"
+              type="button"
+              class="schedule-sidebar__toggle"
+              data-sidebar-action="toggle-sidebar-collapse"
+              aria-controls="schedule-sidebar-content"
+              aria-expanded="true"
+              title="Свернуть панель"
+            >
+              <span class="schedule-sidebar__toggle-icon" aria-hidden="true">‹</span>
+              <span class="schedule-sidebar__toggle-label visually-hidden">Свернуть панель</span>
+            </button>
+            <div id="schedule-sidebar-content">
+              <section id="sidebar-calendar-panel"></section>
+              <section id="sidebar-period-panel" data-sidebar-section="period"></section>
+              <section id="sidebar-trainers-panel" data-sidebar-section="trainers"></section>
+              <section id="sidebar-horses-panel" data-sidebar-section="horses"></section>
+            </div>
+          </aside>
+
           <section id="calendar-shell" class="card shadow-sm overflow-hidden">
             <div id="calendar-container" class="card-body p-0 h-100"></div>
           </section>
-
-          <aside id="booking-details-panel" class="card shadow-sm">
-            <div id="booking-details-content"></div>
-          </aside>
         </div>
       </section>
     </main>
@@ -92,11 +116,12 @@
   <div id="booking-modal" class="modal fade" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content">
-        <div class="modal-header">
-          <div>
+        <div class="modal-header booking-modal-header">
+          <div class="booking-modal-header__title">
             <h2 id="booking-modal-title" class="modal-title fs-5">Новое занятие</h2>
             <div id="booking-modal-subtitle" class="small text-body-secondary"></div>
           </div>
+          <div id="booking-conflicts" class="booking-modal-header__conflicts"></div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
         </div>
 
@@ -118,8 +143,8 @@
                 <select id="booking-duration" class="form-select"></select>
               </div>
               <div class="col-md-6">
-                <label class="form-label" for="booking-service-type">Тип</label>
-                <select id="booking-service-type" class="form-select"></select>
+                <label id="booking-service-label" class="form-label" for="booking-service-id">Тип</label>
+                <select id="booking-service-id" class="form-select"></select>
               </div>
               <div class="col-md-6">
                 <label class="form-label" for="booking-client-name">Клиент</label>
@@ -196,8 +221,6 @@
                 <a id="booking-bitrix-deal-link" class="small d-none" href="#" target="_blank" rel="noopener noreferrer">Открыть сделку</a>
               </div>
             </div>
-
-            <div id="booking-conflicts" class="d-grid gap-2 mt-3"></div>
           </div>
 
           <div class="modal-footer justify-content-between">
@@ -210,6 +233,7 @@
               <button id="booking-confirm-btn" type="button" class="btn btn-primary">Подтвердить</button>
               <button id="booking-save-btn" type="button" class="btn btn-primary d-none">Сохранить</button>
               <button id="booking-complete-btn" type="button" class="btn btn-success d-none">Проведено</button>
+              <button id="booking-restore-btn" type="button" class="btn btn-success d-none">Восстановить занятие</button>
               <button id="booking-cancel-btn" type="button" class="btn btn-outline-danger d-none">Отменить занятие</button>
             </div>
           </div>
@@ -233,6 +257,12 @@
     }
     if (typeof window.KSK_FLAGS.trainerScheduleMvp !== "boolean") {
       window.KSK_FLAGS.trainerScheduleMvp = window.localStorage.getItem("ksk_trainer_schedule_mvp") !== "0";
+    }
+    if (typeof window.KSK_FLAGS.serviceCatalogMvp !== "boolean") {
+      window.KSK_FLAGS.serviceCatalogMvp = window.localStorage.getItem("ksk_service_catalog_mvp") !== "0";
+    }
+    if (typeof window.KSK_FLAGS.resourceSidebarFilterV1 !== "boolean") {
+      window.KSK_FLAGS.resourceSidebarFilterV1 = window.localStorage.getItem("ksk_resource_sidebar_filter_v1") !== "0";
     }
   </script>
   <script defer src="js/data.js"></script>

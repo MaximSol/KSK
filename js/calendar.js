@@ -35,7 +35,8 @@ window.KSK = window.KSK || {};
   }
 
   function syncRuntimeMetrics() {
-    var metricSource = container || document.documentElement;
+    var page = container ? container.closest("#calendar-page") : null;
+    var metricSource = page || document.documentElement;
     var styles;
 
     if (!metricSource) {
@@ -44,7 +45,7 @@ window.KSK = window.KSK || {};
       return;
     }
 
-    styles = window.getComputedStyle(document.documentElement);
+    styles = window.getComputedStyle(metricSource);
     HOUR_HEIGHT = getCssPixelValue(styles, "--ksk-hour-height", DEFAULT_HOUR_HEIGHT);
     QUARTER_HEIGHT = getCssPixelValue(styles, "--ksk-quarter-height", DEFAULT_QUARTER_HEIGHT);
   }
@@ -322,18 +323,18 @@ window.KSK = window.KSK || {};
 
   function getCardResourceLine(booking, viewType, lookups, compact) {
     var names = getBookingNames(booking, lookups);
-    var serviceLabel = Utils.SERVICE_LABELS[booking.serviceType] || booking.serviceType;
+    var serviceLabel = booking.serviceName || Utils.SERVICE_LABELS[booking.serviceType] || booking.serviceType || "Не задано";
 
     if (compact) {
       if (viewType === "trainers") {
-        return [names.horseName, names.arenaName].filter(Boolean).join(" • ");
+        return [serviceLabel, names.horseName].filter(Boolean).join(" • ");
       }
 
       if (viewType === "horses") {
-        return [names.trainerName, names.arenaName].filter(Boolean).join(" • ");
+        return [serviceLabel, names.trainerName].filter(Boolean).join(" • ");
       }
 
-      return [names.trainerName, names.horseName].filter(Boolean).join(" • ");
+      return [serviceLabel, names.trainerName, names.horseName].filter(Boolean).join(" • ");
     }
 
     if (viewType === "trainers") {
@@ -735,17 +736,34 @@ window.KSK = window.KSK || {};
     return availability;
   }
 
+  function createCalendarEmptyState(title, text, allowResetAction) {
+    var empty = el("div", "calendar-empty-state");
+    empty.appendChild(el("h3", "calendar-empty-state__title", title));
+    empty.appendChild(el("p", "calendar-empty-state__text", text));
+    if (allowResetAction) {
+      var resetButton = document.createElement("button");
+      resetButton.type = "button";
+      resetButton.className = "btn btn-sm btn-outline-secondary";
+      resetButton.dataset.action = "clear-resource-filter";
+      resetButton.textContent = "Сбросить фильтр";
+      empty.appendChild(resetButton);
+    }
+    return empty;
+  }
+
   KSK.Calendar = {
     init: function () {
       container = document.getElementById("calendar-container");
       this._attachClickHandlers();
     },
 
-    renderDayView: function (date, resourceType) {
+    renderDayView: function (date, resourceType, options) {
       var fragment = document.createDocumentFragment();
       var scroll = el("div", "calendar-scroll");
       var resources;
-      var bookings = KSK.Data.getBookings(date);
+      var bookings = options && Array.isArray(options.bookings) ? options.bookings : KSK.Data.getBookings(date);
+      var allDayBookings = options && Array.isArray(options.allDayBookings) ? options.allDayBookings : KSK.Data.getBookings(date);
+      var allowEmptyResetAction = Boolean(options && options.allowEmptyResetAction);
       var lookups = createLookups();
       var columnsById = {};
       var bookingsByResourceId = {};
@@ -753,6 +771,10 @@ window.KSK = window.KSK || {};
       var timeHeader = el("div", "calendar-time-header px-2 py-2 border-bottom fw-semibold text-body-secondary", "Время");
       var grid = el("div", "calendar-grid");
       var enhanced = KSK.App.isScheduleInsightsEnabled();
+      var hasResourceFilter = enhanced
+        && typeof KSK.App.isResourceSidebarFilterEnabled === "function"
+        && KSK.App.isResourceSidebarFilterEnabled()
+        && Boolean(KSK.App.state.resourceFilterType);
       var trainerScheduleEnabled = resourceType === "trainers" && KSK.App.isTrainerScheduleEnabled();
       var hasFocus = enhanced && KSK.App.state.focusFilter !== "all";
 
@@ -804,15 +826,35 @@ window.KSK = window.KSK || {};
         });
 
         if (visibleResources.length === 0) {
-          var empty = el("div", "calendar-empty-state");
-          empty.appendChild(el("h3", "calendar-empty-state__title", "На выбранную дату нет тренеров в смене"));
-          empty.appendChild(el("p", "calendar-empty-state__text", "Смените дату или откройте неделю, чтобы увидеть все записи."));
+          var empty = createCalendarEmptyState(
+            "На выбранную дату нет тренеров в смене",
+            "Смените дату или откройте неделю, чтобы увидеть все записи.",
+            allowEmptyResetAction
+          );
           scroll.appendChild(empty);
           fragment.appendChild(scroll);
           container.replaceChildren(fragment);
           this.highlightCurrentHour();
           return;
         }
+      }
+
+      if (hasResourceFilter) {
+        visibleResources = visibleResources.filter(function (resource) {
+          return (bookingsByResourceId[resource.id] || []).length > 0;
+        });
+      }
+
+      if (visibleResources.length === 0) {
+        scroll.appendChild(createCalendarEmptyState(
+          "По текущему фильтру ничего не найдено",
+          "Сбросьте фильтр или измените дату, чтобы снова увидеть занятия.",
+          allowEmptyResetAction
+        ));
+        fragment.appendChild(scroll);
+        container.replaceChildren(fragment);
+        this.highlightCurrentHour();
+        return;
       }
 
       grid.style.setProperty("--ksk-column-count", String(visibleResources.length));
@@ -823,7 +865,7 @@ window.KSK = window.KSK || {};
         var columnBookings = meta.columnBookings || bookingsByResourceId[resource.id] || [];
         var secondary;
         var relevantCount = columnBookings.filter(function (booking) {
-          return isCardRelevant(booking, bookings);
+          return isCardRelevant(booking, allDayBookings);
         }).length;
         var availability = Object.prototype.hasOwnProperty.call(meta, "availability") ? meta.availability : null;
 
@@ -851,7 +893,7 @@ window.KSK = window.KSK || {};
             layout: layout[booking.id],
             compactWeek: false,
             resourceId: resource.id,
-            dayBookings: bookings,
+            dayBookings: allDayBookings,
             lookups: lookups
           }));
         });
@@ -966,7 +1008,12 @@ window.KSK = window.KSK || {};
       var bookingsByResourceAndDate = {};
       var relevantCountByResourceId = {};
       var relevantCountByDate = {};
+      var visibleResources;
       var enhanced = KSK.App.isScheduleInsightsEnabled();
+      var hasResourceFilter = enhanced
+        && typeof KSK.App.isResourceSidebarFilterEnabled === "function"
+        && KSK.App.isResourceSidebarFilterEnabled()
+        && Boolean(KSK.App.state.resourceFilterType);
       var hasFocus = enhanced && KSK.App.state.focusFilter !== "all";
       var isTrainerAvailabilityWeek = resourceType === "trainers"
         && KSK.App.isTrainerScheduleEnabled()
@@ -1007,6 +1054,25 @@ window.KSK = window.KSK || {};
         }
       });
 
+      visibleResources = resources;
+      if (hasResourceFilter) {
+        visibleResources = resources.filter(function (resource) {
+          return (bookingsByResourceId[resource.id] || []).length > 0;
+        });
+      }
+
+      if (!visibleResources.length) {
+        scroll.appendChild(createCalendarEmptyState(
+          "По текущему фильтру ничего не найдено",
+          "Сбросьте фильтр или переключите период, чтобы снова увидеть занятия.",
+          hasResourceFilter
+        ));
+        fragment.appendChild(scroll);
+        container.replaceChildren(fragment);
+        this.highlightCurrentHour();
+        return;
+      }
+
       weekDates.forEach(function (date) {
         var header = el("div", "calendar-week-day-header");
         var total = (visibleBookingsByDate[date] || []).length;
@@ -1017,9 +1083,9 @@ window.KSK = window.KSK || {};
         }
 
         if (isTrainerAvailabilityWeek) {
-          metaLabel += " • " + formatWindowCount(trainerWeekSummary.dayWindowCounts[date]);
+          metaLabel += " • " + formatWindowCount(trainerWeekSummary.visibleDayWindowCounts[date]);
         } else if (isHorseAvailabilityWeek) {
-          metaLabel += " • " + formatStartCount(horseWeekSummary.dayStartCounts[date]);
+          metaLabel += " • " + formatStartCount(horseWeekSummary.visibleDayStartCounts[date]);
         }
 
         header.appendChild(el("div", "calendar-week-day-header__title", Utils.toDate(date).toLocaleDateString("ru-RU", {
@@ -1031,7 +1097,7 @@ window.KSK = window.KSK || {};
         matrix.appendChild(header);
       });
 
-      resources.forEach(function (resource) {
+      visibleResources.forEach(function (resource) {
         var resourceHeader = el("div", "calendar-week-resource-header");
         var weeklyTotal = bookingsByResourceId[resource.id].length;
         var headerMeta = weeklyTotal + " " + Utils.pluralize(weeklyTotal, ["занятие", "занятия", "занятий"]);
